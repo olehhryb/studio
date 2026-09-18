@@ -1,0 +1,65 @@
+import { useEffect, useState } from "react";
+import { api, getToken, setToken } from "./api.js";
+import Login from "./pages/Login.jsx";
+import SitePicker from "./pages/SitePicker.jsx";
+import Studio from "./pages/Studio.jsx";
+
+export default function App() {
+  const [user, setUser] = useState(null);
+  const [siteId, setSiteId] = useState(null);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    if (!getToken()) {
+      setReady(true);
+      return;
+    }
+    api
+      .me()
+      .then((data) => setUser(data.user))
+      .catch(() => setToken(null))
+      .finally(() => setReady(true));
+  }, []);
+
+  if (!ready) {
+    return <div className="boot">Opening the studio…</div>;
+  }
+
+  if (!user) {
+    return (
+      <Login
+        onLogin={(payload) => {
+          setToken(payload.token);
+          setUser(payload.user);
+        }}
+      />
+    );
+  }
+
+  if (!siteId) {
+    return (
+      <SitePicker
+        user={user}
+        onOpenSite={setSiteId}
+        onLogout={() => {
+          setToken(null);
+          setUser(null);
+          setSiteId(null);
+        }}
+      />
+    );
+  }
+
+  return (
+    <Studio
+      user={user}
+      siteId={siteId}
+      onBack={() => setSiteId(null)}
+      onLogout={() => {
+        setToken(null);
+        setUser(null);
+        setSiteId(null);
+      }}
+    />
+  );
+}

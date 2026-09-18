@@ -1,0 +1,29 @@
+node_modules
+dist
+.env
+logs
+server/data/users.json
+*.log
+.DS_Store
+client/dist
+storage/
+
+# Private SSH key for local Docker hosting (public key is committed)
+docker/ssh/deploy_ed25519
+
+# WordPress installs in the local Docker hosting volume
+sites/site1/**
+sites/site2/**
+sites/site3/**
+!sites/site1/.gitkeep
+!sites/site2/.gitkeep
+!sites/site3/.gitkeep
+
+# Saved studio configs (may contain DB passwords)
+site_configs/*.conf
+themes/**/*.conf
+themes/**/*.webp
+themes/**/logos.json
+!site_configs/.gitkeep
+!themes/.gitkeep
+.vercel

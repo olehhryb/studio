@@ -1,0 +1,21 @@
+{
+  "name": "wp-theme-studio",
+  "private": true,
+  "type": "module",
+  "version": "1.0.0",
+  "description": "Authorized studio to generate WordPress themes, pages, CF7 forms, and images",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "start": "npm run start -w server",
+    "build": "npm run build -w client",
+    "docker:up": "docker compose up -d --build",
+    "docker:down": "docker compose down"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

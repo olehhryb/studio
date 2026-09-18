@@ -1,0 +1,19 @@
+# WP Theme Studio config — one KEY: value per line
+PRIMARY_COLOR: #1F4D3A
+SECONDARY_COLOR: #C45C26
+COMPANY_NAME: Oak & Iron Plumbing
+AREA_OF_BUSINESS: Residential and commercial plumbing
+CITY: Manchester
+PHONE: +44 161 555 0199
+EMAIL: hello@oakandiron.example
+THEME_FEATURES: full width, with topbar, content in container, sticky header
+THEME_REQUIREMENTS: Warm editorial look, large homepage hero, and a clear contact call to action
+SITE_NAME: Oak & Iron Plumbing
+WP_SITE_URL: http://localhost:8080/site1
+WP_REMOTE_PATH: /home/deploy/public_html/site1
+WP_DB_NAME: site1
+WP_DB_USER: site1
+WP_DB_PASSWORD: site1pass
+WP_ADMIN_EMAIL: admin@localhost.local
+WP_ADMIN_PASSWORD: adminpass
+WP_EDITOR_EMAIL: editor@localhost.local

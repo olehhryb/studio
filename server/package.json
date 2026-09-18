@@ -1,0 +1,23 @@
+{
+  "name": "server",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "bcryptjs": "^2.4.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "jsonwebtoken": "^9.0.2",
+    "multer": "^2.0.2",
+    "node-ssh": "^13.2.1",
+    "openai": "^4.85.4",
+    "pngjs": "^7.0.0",
+    "sharp": "^0.35.4",
+    "uuid": "^11.1.0"
+  }
+}
