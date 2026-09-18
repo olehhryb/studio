@@ -74,10 +74,10 @@ function siteKeyFromRemotePath(remotePath) {
 
 export function getWpDbConfig(remotePath, brief = {}) {
   const config = {
-    host: String(brief.wpDbHost || process.env.WP_DB_HOST || "localhost").trim(),
-    user: String(process.env.WP_DB_USER || process.env.WP_DB_USERNAME || "").trim(),
-    password: String(process.env.WP_DB_PASSWORD || "").trim(),
-    name: String(process.env.WP_DB_NAME || "").trim(),
+    host: String(brief.wpDbHost || "localhost").trim(),
+    user: "",
+    password: "",
+    name: "",
     adminUser: String(process.env.WP_ADMIN_USER || "admin").trim(),
     adminPassword: String(brief.wpAdminPassword || process.env.WP_ADMIN_PASSWORD || "").trim(),
     adminEmail: String(brief.wpAdminEmail || process.env.WP_ADMIN_EMAIL || "").trim(),

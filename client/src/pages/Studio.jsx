@@ -991,6 +991,14 @@ function SiteSettingsFields({ brief, onChange, includeCredentials = false }) {
         />
       </label>
       <label>
+        Database host
+        <input
+          placeholder="db"
+          value={brief.wpDbHost}
+          onChange={(e) => patch("wpDbHost", e.target.value)}
+        />
+      </label>
+      <label>
         Database name
         <input
           placeholder="site1"

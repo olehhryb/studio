@@ -51,7 +51,7 @@ docker compose down
 
 **SSH install (preferred when `.env` has SSH settings):** the studio asks for the public site URL and the folder on the server. The job connects over SSH, creates the folder if needed, installs WordPress, creates an `editor` user with an application password, then uploads and activates the generated theme.
 
-`.env` fields: `SSH_URL` (or `SSH_HOST`), `SSH_USERNAME`, and `SSH_PRIVATE_KEY_PATH` (or `SSH_PRIVATE_KEY` / `SSH_PASSWORD`), plus `WP_DB_USER` / `WP_DB_PASSWORD` / `WP_DB_HOST` for MySQL on that server.
+`.env` fields: `SSH_URL` (or `SSH_HOST`), `SSH_USERNAME`, and `SSH_PRIVATE_KEY_PATH` (or `SSH_PRIVATE_KEY` / `SSH_PASSWORD`). MySQL host, user, password, and database name are per-site fields in the studio (for this Docker stack the host from WordPress is `db`).
 
 **REST-only:** if SSH is not configured, paste a WordPress application password (Users → Profile → Application Passwords). Install the included **WP Theme Studio Bridge** plugin once (`server/plugins/wtg-bridge`) so the studio can install the theme and create CF7 forms. Core REST still creates pages and media if the bridge is missing.
 

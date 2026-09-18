@@ -1,43 +1,38 @@
 import { DEFAULT_TEXT_FONT, DEFAULT_TITLE_FONT, sanitizeGoogleFont } from "../../shared/googleFonts.js";
 
 const ALIASES = {
-  PRIMARY_COLOR: ["PRIMARY_COLOR", "PRIMARY", "COLOR_PRIMARY"],
-  SECONDARY_COLOR: ["SECONDARY_COLOR", "SECONDARY", "COLOR_SECONDARY"],
-  COMPANY_NAME: ["COMPANY_NAME", "COMPANY", "BUSINESS_NAME", "NAME"],
-  AREA_OF_BUSINESS: ["AREA_OF_BUSINESS", "BUSINESS", "INDUSTRY", "NICHE", "AREA"],
-  CITY: ["CITY", "LOCATION", "TOWN"],
-  PHONE: ["PHONE", "PHONE_NUMBER", "TEL", "TELEPHONE"],
-  EMAIL: ["EMAIL", "MAIL", "E_MAIL"],
-  THEME_FEATURES: ["THEME_FEATURES", "FEATURES", "THEME"],
-  THEME_REQUIREMENTS: ["THEME_REQUIREMENTS", "ADDITIONAL_REQUIREMENTS", "EXTRA_REQUIREMENTS", "REQUIREMENTS"],
-  PAGE_STYLE_REQUIREMENTS: ["PAGE_STYLE_REQUIREMENTS", "PAGE_STYLES", "PAGE_STYLE", "PAGES_STYLE"],
-  LOGO_PROMPT: ["LOGO_PROMPT", "LOGO"],
+  PRIMARY_COLOR: ["PRIMARY_COLOR"],
+  SECONDARY_COLOR: ["SECONDARY_COLOR"],
+  COMPANY_NAME: ["COMPANY_NAME"],
+  AREA_OF_BUSINESS: ["AREA_OF_BUSINESS"],
+  CITY: ["CITY"],
+  PHONE: ["PHONE"],
+  EMAIL: ["EMAIL"],
+  THEME_FEATURES: ["THEME_FEATURES"],
+  THEME_REQUIREMENTS: ["THEME_REQUIREMENTS"],
+  PAGE_STYLE_REQUIREMENTS: ["PAGE_STYLE_REQUIREMENTS"],
+  LOGO_PROMPT: ["LOGO_PROMPT"],
   LOGO_WIDTH: ["LOGO_WIDTH"],
   LOGO_HEIGHT: ["LOGO_HEIGHT"],
   LOGO_FILE: ["LOGO_FILE"],
   LOGO_UPDATED_AT: ["LOGO_UPDATED_AT"],
-  LOGO_ID: ["LOGO_ID", "ACTIVE_LOGO"],
-  LOGOS_JSON: ["LOGOS_JSON", "LOGOS"],
-  TITLE_FONT: ["TITLE_FONT", "HEADING_FONT", "HEADINGS_FONT", "GOOGLE_TITLE_FONT"],
-  TEXT_FONT: ["TEXT_FONT", "BODY_FONT", "GOOGLE_TEXT_FONT", "GOOGLE_BODY_FONT"],
-  WP_SITE_URL: ["WP_SITE_URL", "WP_URL", "SITE_URL", "WORDPRESS_URL", "WP_SITE_ADDRESS", "DOMAIN", "SITE_DOMAIN"],
-  WP_REMOTE_PATH: ["WP_REMOTE_PATH", "REMOTE_PATH", "SSH_PATH", "WP_PATH", "SITE_PATH", "WP_FOLDER", "FOLDER"],
-  WP_USERNAME: ["WP_USERNAME", "WP_USER", "USERNAME", "WP_LOGIN"],
-  WP_APP_PASSWORD: [
-    "WP_APP_PASSWORD",
-    "WP_PASSWORD",
-    "APP_PASSWORD",
-    "WP_CREDENTIALS",
-    "PASSWORD",
-  ],
-  SITE_NAME: ["SITE_NAME", "SITE_TITLE", "WP_TITLE"],
-  WP_DB_NAME: ["WP_DB_NAME", "DB_NAME", "DATABASE", "DATABASE_NAME"],
-  WP_DB_USER: ["WP_DB_USER", "DB_USER", "DATABASE_USER"],
-  WP_DB_PASSWORD: ["WP_DB_PASSWORD", "DB_PASSWORD", "DATABASE_PASSWORD"],
-  WP_ADMIN_EMAIL: ["WP_ADMIN_EMAIL", "ADMIN_EMAIL"],
+  LOGO_ID: ["LOGO_ID"],
+  LOGOS_JSON: ["LOGOS_JSON"],
+  TITLE_FONT: ["TITLE_FONT"],
+  TEXT_FONT: ["TEXT_FONT"],
+  WP_SITE_URL: ["WP_SITE_URL"],
+  WP_REMOTE_PATH: ["WP_REMOTE_PATH"],
+  WP_USERNAME: ["WP_USERNAME"],
+  WP_APP_PASSWORD: ["WP_APP_PASSWORD"],
+  SITE_NAME: ["SITE_NAME"],
+  WP_DB_HOST: ["WP_DB_HOST"],
+  WP_DB_NAME: ["WP_DB_NAME"],
+  WP_DB_USER: ["WP_DB_USER"],
+  WP_DB_PASSWORD: ["WP_DB_PASSWORD"],
+  WP_ADMIN_EMAIL: ["WP_ADMIN_EMAIL"],
   WP_ADMIN_PASSWORD: ["WP_ADMIN_PASSWORD"],
-  WP_EDITOR_EMAIL: ["WP_EDITOR_EMAIL", "EDITOR_EMAIL"],
-  PAGES_JSON: ["PAGES_JSON", "PAGES"],
+  WP_EDITOR_EMAIL: ["WP_EDITOR_EMAIL"],
+  PAGES_JSON: ["PAGES_JSON"],
 };
 
 const CANONICAL = Object.fromEntries(
@@ -128,6 +123,7 @@ export function normalizeBrief(input = {}) {
     wpUsername: String(input.WP_USERNAME || input.wpUsername || "").trim(),
     wpAppPassword: String(input.WP_APP_PASSWORD || input.wpAppPassword || "").trim(),
     siteName: String(input.SITE_NAME || input.siteName || input.COMPANY_NAME || input.companyName || "").trim(),
+    wpDbHost: String(input.WP_DB_HOST || input.wpDbHost || "").trim(),
     wpDbName: String(input.WP_DB_NAME || input.wpDbName || "").trim(),
     wpDbUser: String(input.WP_DB_USER || input.wpDbUser || "").trim(),
     wpDbPassword: String(input.WP_DB_PASSWORD || input.wpDbPassword || "").trim(),
@@ -148,6 +144,7 @@ export function validateBrief(brief, options = {}) {
     errors.push("Site domain must start with http:// or https://");
   }
   if (!brief.wpRemotePath) errors.push("WordPress folder is required");
+  if (!brief.wpDbHost) errors.push("Database host is required");
   if (!brief.wpDbName) errors.push("Database name is required");
   if (!brief.wpDbUser) errors.push("Database user is required");
   if (!brief.wpDbPassword) errors.push("Database password is required");
