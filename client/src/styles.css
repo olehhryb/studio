@@ -79,6 +79,33 @@ label { display: grid; gap: 0.35rem; font-size: 0.92rem; }
   padding: 2rem;
 }
 
+.ai-timeouts {
+  margin: 0 2rem 1rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid #e8b4b8;
+  background: #fff4f4;
+}
+.ai-timeouts-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.8rem;
+  align-items: center;
+}
+.ai-timeouts p { margin: 0.45rem 0 0; }
+.ai-timeouts ol {
+  margin: 0.6rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+  color: var(--mute);
+  font-size: 0.88rem;
+}
+.ai-timeouts li {
+  display: grid;
+  gap: 0.1rem;
+}
+.ai-timeouts time { color: var(--accent); }
+
 .studio { padding: 1.5rem 2rem 3rem; }
 .top {
   display: flex;
@@ -320,6 +347,18 @@ fieldset.locked-fields:disabled {
   flex: 0 0 auto;
   padding: 0.45rem 0.7rem;
   white-space: nowrap;
+}
+.plugin-actions {
+  display: grid;
+  gap: 0.55rem;
+}
+.plugin-buttons {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.5rem;
+}
+.plugin-buttons button {
+  padding: 0.65rem 0.8rem;
 }
 a.button-link {
   display: inline-flex;

@@ -4,14 +4,20 @@
   "type": "module",
   "version": "1.0.0",
   "description": "Authorized studio to generate WordPress themes, pages, CF7 forms, and images",
+  "engines": {
+    "node": ">=20"
+  },
   "workspaces": [
     "server",
     "client"
   ],
   "scripts": {
     "dev": "concurrently -n api,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w client\"",
+    "dev:vercel": "npm run env:vercel && npm run dev",
+    "env:vercel": "npx vercel env pull .env.local --yes --environment=development",
     "start": "npm run start -w server",
-    "build": "npm run build -w client",
+    "build": "npm run build -w client && node scripts/copy-vercel-public.js",
+    "vercel-build": "npm run build",
     "docker:up": "docker compose up -d --build",
     "docker:down": "docker compose down"
   },

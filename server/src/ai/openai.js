@@ -6,6 +6,8 @@ import sharp from "sharp";
 import { config } from "../config.js";
 import { clampLogoSize } from "../configParser.js";
 import { logHttp } from "../debugLog.js";
+import { syncIfNeeded } from "../store/persist.js";
+import { withAiTimeout } from "./timeouts.js";
 import {
   themeSystemPrompt,
   themeUserPrompt,
@@ -30,7 +32,7 @@ function parseJson(text) {
   return JSON.parse(trimmed.slice(start, end + 1));
 }
 
-async function chatJson(system, user) {
+async function chatJson(system, user, label = "chat") {
   const openai = client();
   if (!openai) return null;
   const started = Date.now();
@@ -44,7 +46,10 @@ async function chatJson(system, user) {
     ],
   };
   try {
-    const completion = await openai.chat.completions.create(requestBody);
+    const completion = await withAiTimeout(
+      { kind: "chat", label, model: config.openaiModel },
+      (signal) => openai.chat.completions.create(requestBody, { signal })
+    );
     const content = completion.choices[0]?.message?.content || "";
     await logHttp({
       direction: "outbound",
@@ -177,17 +182,17 @@ function _esc(v) {
 }
 
 export async function generateThemeSpec(brief) {
-  const data = await chatJson(themeSystemPrompt(), themeUserPrompt(brief));
+  const data = await chatJson(themeSystemPrompt(), themeUserPrompt(brief), "theme");
   return data || mockTheme(brief);
 }
 
 export async function generatePages(brief) {
-  const data = await chatJson(pagesSystemPrompt(), pagesUserPrompt(brief));
+  const data = await chatJson(pagesSystemPrompt(), pagesUserPrompt(brief), "pages");
   return data || mockPages(brief);
 }
 
 export async function generatePage(brief, page) {
-  const data = await chatJson(pageSystemPrompt(page.format), pageUserPrompt(brief, page));
+  const data = await chatJson(pageSystemPrompt(page.format), pageUserPrompt(brief, page), page.key || "page");
   return data || mockSinglePage(brief, page);
 }
 
@@ -264,7 +269,7 @@ ${page.key === "contact" ? "<!-- wp:shortcode -->{{CF7_FORM}}<!-- /wp:shortcode 
 }
 
 export async function generateCf7(brief) {
-  const data = await chatJson(cf7SystemPrompt(), cf7UserPrompt(brief));
+  const data = await chatJson(cf7SystemPrompt(), cf7UserPrompt(brief), "cf7");
   return data || mockCf7(brief);
 }
 
@@ -346,6 +351,7 @@ export async function writeSolidPng(filePath, width, height, hex) {
 async function writeWebpFile(filePath, input) {
   await fs.mkdir(path.dirname(filePath), { recursive: true });
   await sharp(input).webp({ quality: 82 }).toFile(filePath);
+  await syncIfNeeded(filePath);
 }
 
 export async function writeLogoFile(filePath, input, width, height) {
@@ -356,6 +362,7 @@ export async function writeLogoFile(filePath, input, width, height) {
     .resize(w, h, { fit: "contain", background: { r: 0, g: 0, b: 0, alpha: 0 } })
     .webp({ quality: 90 })
     .toFile(filePath);
+  await syncIfNeeded(filePath);
   return { width: w, height: h };
 }
 
@@ -435,7 +442,10 @@ export async function generateImageFile(filePath, placeholder, brief) {
     size: imageSize(config.openaiImageModel, placeholder.width, placeholder.height),
   };
   try {
-    const result = await openai.images.generate(payload);
+    const result = await withAiTimeout(
+      { kind: "image", label: placeholder.id || "image", model: config.openaiImageModel },
+      (signal) => openai.images.generate(payload, { signal })
+    );
     const buf = await bufferFromImageResult(result);
     await logHttp({
       direction: "outbound",

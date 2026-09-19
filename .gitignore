@@ -1,11 +1,13 @@
 node_modules
 dist
 .env
+.env.local
 logs
 server/data/users.json
 *.log
 .DS_Store
 client/dist
+public/
 storage/
 
 # Private SSH key for local Docker hosting (public key is committed)
@@ -23,7 +25,9 @@ sites/site3/**
 site_configs/*.conf
 themes/**/*.conf
 themes/**/*.webp
+themes/**/*.zip
 themes/**/logos.json
 !site_configs/.gitkeep
 !themes/.gitkeep
 .vercel
+.env*

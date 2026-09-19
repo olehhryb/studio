@@ -31,7 +31,7 @@ async function request(path, options = {}, attempt = 0) {
     const res = await fetch(path, {
       ...options,
       headers,
-      signal: options.signal || AbortSignal.timeout(12000),
+      signal: options.signal || AbortSignal.timeout(30000),
     });
     const data = await res.json().catch(() => ({}));
     if (!res.ok) {
@@ -49,7 +49,11 @@ async function request(path, options = {}, attempt = 0) {
       return request(path, options, attempt + 1);
     }
     if (err.name === "TimeoutError" || /timeout/i.test(err.message || "")) {
-      throw new Error("API did not respond. Use http://localhost:5173 and keep a single npm run dev running.");
+      throw new Error(
+        import.meta.env.DEV
+          ? "API did not respond. Use http://localhost:5173 and keep a single npm run dev running."
+          : "API did not respond. Try again in a moment."
+      );
     }
     throw err;
   }
@@ -75,6 +79,8 @@ export const api = {
     request(`/api/sites/${siteId}/themes/${themeId}`, { method: "PUT", body: JSON.stringify(payload) }),
   generateTheme: (siteId, themeId, payload) =>
     request(`/api/sites/${siteId}/themes/${themeId}/generate`, { method: "POST", body: JSON.stringify(payload) }),
+  installTheme: (siteId, themeId) =>
+    request(`/api/sites/${siteId}/themes/${themeId}/install`, { method: "POST", body: JSON.stringify({}) }),
   uploadThemeLogo: (siteId, themeId, file, meta = {}) => {
     const body = new FormData();
     body.append("logo", file);
@@ -107,9 +113,18 @@ export const api = {
     }),
   getSiteBuilders: (siteId) =>
     request(`/api/sites/${siteId}/builders`, { signal: AbortSignal.timeout(25000) }),
+  installSitePlugin: (siteId, plugin) =>
+    request(`/api/sites/${siteId}/plugins`, {
+      method: "POST",
+      body: JSON.stringify({ plugin }),
+      signal: AbortSignal.timeout(25000),
+    }),
   job: (id) => request(`/api/generate/${id}`),
   debugStatus: () => request("/api/debug"),
   setDebug: (enabled) => request("/api/debug", { method: "POST", body: JSON.stringify({ enabled }) }),
+  listAiTimeouts: () => request("/api/ai-timeouts"),
+  reportAiTimeout: (payload) =>
+    request("/api/ai-timeouts", { method: "POST", body: JSON.stringify(payload), retries: 0 }),
 };
 
 export function withAuthUrl(url) {
@@ -121,14 +136,27 @@ export function withAuthUrl(url) {
 }
 
 export function subscribeJob(jobId, onEvent) {
-  const token = getToken();
-  const source = new EventSource(`/api/generate/${jobId}/events?token=${encodeURIComponent(token || "")}`);
-  source.onmessage = (event) => {
+  let stopped = false;
+  let last = "";
+
+  async function tick() {
+    if (stopped) return;
     try {
-      onEvent(JSON.parse(event.data));
+      const job = await api.job(jobId);
+      const snap = JSON.stringify(job);
+      if (snap !== last) {
+        last = snap;
+        onEvent({ type: "snapshot", job });
+      }
+      if (job.status === "done" || job.status === "error") return;
     } catch {
-      /* ignore */
+      /* keep polling while the function is still running */
     }
+    setTimeout(tick, 1000);
+  }
+
+  tick();
+  return () => {
+    stopped = true;
   };
-  return () => source.close();
 }

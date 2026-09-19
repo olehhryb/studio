@@ -4,8 +4,10 @@ import bcrypt from "bcryptjs";
 import { config } from "./config.js";
 
 const usersFile = path.join(config.dataDir, "users.json");
+let memoryUsers = null;
 
 async function readUsers() {
+  if (memoryUsers) return memoryUsers;
   try {
     return JSON.parse(await fs.readFile(usersFile, "utf8"));
   } catch {
@@ -14,12 +16,14 @@ async function readUsers() {
 }
 
 async function writeUsers(users) {
+  memoryUsers = users;
+  if (config.ephemeralFs) return;
   await fs.mkdir(config.dataDir, { recursive: true });
   await fs.writeFile(usersFile, JSON.stringify(users, null, 2));
 }
 
 export async function ensureAdminUser() {
-  const users = await readUsers();
+  const users = config.ephemeralFs ? [] : await readUsers();
   const existing = users.find((u) => u.username === config.adminUsername);
   const passwordHash = await bcrypt.hash(config.adminPassword, 10);
   if (existing) {

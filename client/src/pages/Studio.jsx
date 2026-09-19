@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, subscribeJob, withAuthUrl } from "../api.js";
+import { useAiDeadline } from "../useAiDeadline.js";
+import { themeInputFingerprint } from "../../../shared/themeFingerprint.js";
 import { FEATURES, PAGE_DEFS, availablePageFormats, baseSiteReady, emptyBrief, featuresToText, mergeLogos, mergePages, parseConfigText } from "../configParse.js";
+import { SITE_PLUGINS, sitePluginActive, withSitePluginActive } from "../../../shared/sitePlugins.js";
 import {
   DEFAULT_TEXT_FONT,
   DEFAULT_TITLE_FONT,
@@ -73,6 +76,8 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
                 gutenberg: true,
                 wpbakery: false,
                 elementor: false,
+                cf7: false,
+                yoast: false,
                 error: err.message,
               });
             }
@@ -80,7 +85,7 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
             if (!cancelled) setBuildersLoading(false);
           }
         } else {
-          setBuilders({ html: true, gutenberg: true, wpbakery: false, elementor: false });
+          setBuilders({ html: true, gutenberg: true, wpbakery: false, elementor: false, cf7: false, yoast: false });
         }
       } catch (err) {
         if (!cancelled) setError(err.message);
@@ -99,22 +104,32 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
   }, [job?.id, job?.status]);
 
   useEffect(() => {
-    if (job?.kind === "install" && job.status === "done") {
-      api.getSite(siteId).then((data) => {
-        setSite(data.site);
-        setSiteBrief({ ...emptyBrief(), ...data.site.brief, pages: mergePages(data.site.brief?.pages) });
-        skipSiteSave.current = true;
-        skipPageSave.current = true;
-        setBuildersLoading(true);
-        return api.getSiteBuilders(siteId);
-      }).then((plugins) => {
-        setBuilders(plugins.builders || null);
-      }).catch(() => {}).finally(() => setBuildersLoading(false));
+    if ((job?.kind !== "install" && job?.kind !== "plugin") || job.status !== "done") return undefined;
+    if (job.kind === "plugin") {
+      setBuilders((current) => withSitePluginActive(current, job.pluginId));
     }
+    let cancelled = false;
+    api.getSite(siteId).then((data) => {
+      if (cancelled) return;
+      setSite(data.site);
+      setSiteBrief({ ...emptyBrief(), ...data.site.brief, pages: mergePages(data.site.brief?.pages) });
+      skipSiteSave.current = true;
+      skipPageSave.current = true;
+      setBuildersLoading(true);
+      return api.getSiteBuilders(siteId);
+    }).then((plugins) => {
+      if (cancelled || !plugins) return;
+      setBuilders(plugins.builders || null);
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setBuildersLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [job?.kind, job?.status, siteId]);
 
   useEffect(() => {
-    if (job?.kind !== "theme" || job.status !== "done" || !theme?.id) return undefined;
+    if ((job?.kind !== "theme" && job?.kind !== "theme-install") || job.status !== "done" || !theme?.id) return undefined;
     let cancelled = false;
     api.getTheme(siteId, theme.id).then((data) => {
       if (cancelled) return;
@@ -262,9 +277,18 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
   }
 
   const installed = Boolean(site?.installed);
-  const canInstall = baseSiteReady(siteBrief) && Boolean(health?.sshConfigured) && !busy;
   const jobRunning = job?.status === "queued" || job?.status === "running";
+  useAiDeadline(logoBusy, { kind: "image", label: "logo" });
+  const canInstall = baseSiteReady(siteBrief) && Boolean(health?.sshConfigured) && !busy;
   const themeReady = installed && Boolean(theme?.id);
+  const themeFingerprint = themeInputFingerprint(themeName, themeBrief);
+  const canGenerateTheme = themeReady && themeFingerprint !== String(theme?.generatedFingerprint || "");
+  const canInstallTheme =
+    themeReady &&
+    Boolean(theme?.hasZip) &&
+    Boolean(theme?.generatedFingerprint) &&
+    theme.generatedFingerprint === themeFingerprint &&
+    theme.generatedFingerprint !== String(theme?.wpInstalledFingerprint || "");
   const logos = mergeLogos(themeBrief.logos);
   const pageSettings = mergePages(siteBrief.pages);
   const formatOptions = useMemo(() => availablePageFormats(builders), [builders]);
@@ -310,9 +334,33 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
     }
   }
 
+  async function installSitePlugin(pluginId) {
+    if (!installed || !health?.sshConfigured || busy || jobRunning) return;
+    if (sitePluginActive(builders, SITE_PLUGINS.find((plugin) => plugin.id === pluginId))) return;
+    setBusy(true);
+    setError("");
+    try {
+      const payload = await api.installSitePlugin(siteId, pluginId);
+      setJob({
+        id: payload.jobId,
+        kind: "plugin",
+        pluginId,
+        status: "running",
+        steps: [],
+        results: [],
+        logs: [],
+        error: null,
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function generateTheme(e) {
     e.preventDefault();
-    if (!themeReady) return;
+    if (!themeReady || !canGenerateTheme) return;
     setBusy(true);
     setError("");
     try {
@@ -327,6 +375,28 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
       setJob({
         id: payload.jobId,
         kind: "theme",
+        status: "running",
+        steps: [],
+        results: [],
+        logs: [],
+        error: null,
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function installTheme() {
+    if (!themeReady || !canInstallTheme) return;
+    setBusy(true);
+    setError("");
+    try {
+      const payload = await api.installTheme(siteId, theme.id);
+      setJob({
+        id: payload.jobId,
+        kind: "theme-install",
         status: "running",
         steps: [],
         results: [],
@@ -446,7 +516,10 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
         <div className="top-meta">
           <span>{user.username}</span>
           {health?.mockAi ? <span className="pill">Mock AI</span> : <span className="pill on">Live AI</span>}
-          {health?.sshConfigured ? <span className="pill on">SSH key</span> : <span className="pill">SSH missing</span>}
+          {health?.sshConfigured ? <span className="pill on">SSH {health.sshHost}:{health.sshPort || 22}</span> : <span className="pill">SSH missing</span>}
+          {health?.storage === "blob" ? <span className="pill on">Vercel Blob</span> : null}
+          {health?.storage === "ephemeral" ? <span className="pill">Storage not persistent</span> : null}
+          {health?.storage === "local" ? <span className="pill">Local disk</span> : null}
           {installed ? <span className="pill on">WP installed</span> : <span className="pill">WP pending</span>}
           <label className="check debug-toggle">
             <input type="checkbox" checked={debugEnabled} onChange={toggleDebug} />
@@ -501,13 +574,49 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
                   <SiteSettingsFields brief={siteBrief} includeCredentials />
                 </fieldset>
               ) : null}
+              <div className="plugin-actions">
+                <p className="hint">
+                  {health?.sshConfigured
+                    ? buildersLoading
+                      ? "Checking installed plugins…"
+                      : "Install plugins on this WordPress site over SSH."
+                    : "SSH is required to install plugins."}
+                </p>
+                <div className="plugin-buttons">
+                  {SITE_PLUGINS.map((plugin) => {
+                    const active = sitePluginActive(builders, plugin);
+                    const installing = jobRunning && job?.kind === "plugin" && job?.pluginId === plugin.id;
+                    return (
+                      <button
+                        key={plugin.id}
+                        type="button"
+                        className={installing ? "working" : active ? "ghost" : ""}
+                        onClick={() => installSitePlugin(plugin.id)}
+                        disabled={
+                          active ||
+                          !health?.sshConfigured ||
+                          buildersLoading ||
+                          busy ||
+                          jobRunning
+                        }
+                      >
+                        {installing
+                          ? `Installing ${plugin.label}…`
+                          : active
+                            ? `${plugin.label} installed`
+                            : `Install ${plugin.label}`}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
             </section>
           ) : (
             <section>
               <h2>Create base site</h2>
               <p className="hint">
                 {health?.sshConfigured
-                  ? `The studio connects over SSH with the private key (${health.sshHost}) and installs WordPress in the folder you specify.`
+                  ? `The studio connects over SSH with the private key (${health.sshHost}:${health.sshPort || 22}) and installs WordPress in the folder you specify. Database host is ${health.wpDbHost || "localhost"} from WP_DB_HOST.`
                   : "SSH is not configured. Add SSH_PRIVATE_KEY to .env, then reload."}
               </p>
               <fieldset className="locked-fields">
@@ -793,9 +902,34 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
               </label>
             </section>
 
-            <button type="button" onClick={generateTheme} disabled={!themeReady || jobRunning || busy || logoBusy}>
-              {jobRunning && job?.kind === "theme" ? "Generating and activating…" : "Generate theme and activate on WP"}
-            </button>
+            <div className="row">
+              <button
+                type="button"
+                onClick={generateTheme}
+                disabled={!canGenerateTheme || jobRunning || busy || logoBusy}
+              >
+                {jobRunning && job?.kind === "theme" ? "Generating…" : "Generate theme"}
+              </button>
+              <button
+                type="button"
+                onClick={installTheme}
+                disabled={!canInstallTheme || jobRunning || busy || logoBusy || !health?.sshConfigured}
+              >
+                {jobRunning && job?.kind === "theme-install" ? "Installing…" : "Install theme"}
+              </button>
+            </div>
+            {themeReady && !canGenerateTheme ? (
+              <p className="hint">Theme already generated for the current settings. Change the brief to generate again.</p>
+            ) : null}
+            {themeReady && canGenerateTheme && !theme?.hasZip ? (
+              <p className="hint">Generate the theme ZIP first, then install it on WordPress.</p>
+            ) : null}
+            {themeReady && theme?.hasZip && theme.generatedFingerprint !== themeFingerprint ? (
+              <p className="hint">Settings changed. Generate the theme again before installing.</p>
+            ) : null}
+            {themeReady && !canInstallTheme && theme?.hasZip && theme.generatedFingerprint === themeFingerprint ? (
+              <p className="hint">This generated theme is already installed. Generate a new version to install again.</p>
+            ) : null}
             </fieldset>
             </>
             ) : null}
@@ -991,14 +1125,6 @@ function SiteSettingsFields({ brief, onChange, includeCredentials = false }) {
         />
       </label>
       <label>
-        Database host
-        <input
-          placeholder="db"
-          value={brief.wpDbHost}
-          onChange={(e) => patch("wpDbHost", e.target.value)}
-        />
-      </label>
-      <label>
         Database name
         <input
           placeholder="site1"
@@ -1081,7 +1207,7 @@ function SiteSettingsFields({ brief, onChange, includeCredentials = false }) {
 
 function applyEvent(current, event) {
   if (!current) return current;
-  if (event.type === "snapshot") return { ...current, ...event.job, kind: event.job?.kind || current.kind, pageKey: event.job?.pageKey || current.pageKey };
+  if (event.type === "snapshot") return { ...current, ...event.job, kind: event.job?.kind || current.kind, pageKey: event.job?.pageKey || current.pageKey, pluginId: event.job?.pluginId || current.pluginId };
   if (event.type === "status") {
     return { ...current, status: event.status, error: event.error || current.error };
   }

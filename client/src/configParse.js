@@ -30,7 +30,6 @@ const ALIASES = {
   WP_USERNAME: "wpUsername",
   WP_APP_PASSWORD: "wpAppPassword",
   SITE_NAME: "siteName",
-  WP_DB_HOST: "wpDbHost",
   WP_DB_NAME: "wpDbName",
   WP_DB_USER: "wpDbUser",
   WP_DB_PASSWORD: "wpDbPassword",
@@ -72,7 +71,6 @@ export function emptyBrief() {
     wpUsername: "",
     wpAppPassword: "",
     siteName: "",
-    wpDbHost: "",
     wpDbName: "",
     wpDbUser: "",
     wpDbPassword: "",
@@ -206,7 +204,6 @@ export function baseSiteReady(brief) {
   return [
     brief.wpRemotePath,
     brief.wpSiteUrl,
-    brief.wpDbHost,
     brief.wpDbName,
     brief.wpDbUser,
     brief.wpDbPassword,

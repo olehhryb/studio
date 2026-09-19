@@ -8,9 +8,14 @@ import { config } from "./config.js";
 import { ensureAdminUser } from "./users.js";
 import { loginHandler, meHandler, requireAuth } from "./auth.js";
 import { normalizeBrief, parseConfigText, PAGE_DEFS, publicBrief, requestedPages, validateBrief, formatAllowed, clampLogoSize } from "./configParser.js";
-import { createJob, getJob, serializeJob } from "./jobs.js";
-import { runInstallPipeline, runThemePipeline, runPagesPipeline } from "./pipeline.js";
+import { createJob, getJob, loadJob, serializeJob } from "./jobs.js";
+import { runInstallPipeline, runThemeGeneratePipeline, runThemeInstallPipeline, runPagesPipeline, runPluginInstallPipeline } from "./pipeline.js";
+import { sitePluginById } from "../../shared/sitePlugins.js";
+import { runBackground } from "./background.js";
+import * as persist from "./store/persist.js";
+import { isBlobStore } from "./store/persist.js";
 import { generateLogoFile, logoPromptFor, writeLogoFile } from "./ai/openai.js";
+import { AI_TIMEOUT_MS, listAiTimeouts, recordAiTimeout } from "./ai/timeouts.js";
 import { zipBridgePlugin } from "./wp/client.js";
 import { detectBuildersForSite } from "./wp/builders.js";
 import {
@@ -91,13 +96,11 @@ async function startPagesJob(req, res, site, theme = null) {
   job.siteId = site.id;
   job.themeId = theme?.id || null;
   res.status(202).json({ jobId: job.id, pageKey: job.pageKey });
-  runPagesPipeline(job).catch((err) => {
-    console.error(`Pages job ${job.id} failed:`, err);
-  });
+  runBackground(() => runPagesPipeline(job));
 }
 
 const app = express();
-app.use(cors({ origin: config.clientOrigin, credentials: true }));
+app.use(cors({ origin: true, credentials: true }));
 app.use(express.json({ limit: "2mb" }));
 app.use(httpLogger);
 
@@ -110,8 +113,46 @@ app.get("/api/health", async (_req, res) => {
     debugLogs: debug.enabled,
     sshConfigured: Boolean(config.ssh?.configured),
     sshHost: config.ssh?.configured ? config.ssh.host : null,
+    sshPort: config.ssh?.configured ? config.ssh.port : null,
+    wpDbHost: config.wpDbHost,
+    storage: isBlobStore() ? "blob" : config.ephemeralFs ? "ephemeral" : "local",
+    storageWarning: isBlobStore()
+      ? ""
+      : config.ephemeralFs
+        ? "Create a Vercel Blob store and connect it to this project so site and theme configs persist."
+        : process.env.VERCEL_OIDC_TOKEN
+          ? "Vercel env is loaded, but the Blob store is not connected to Development. In the Blob store: Projects → Update Project Connection → include Development, then npm run env:vercel. Until then sites are saved in local site_configs/."
+          : "",
+    aiTimeoutMs: AI_TIMEOUT_MS,
   });
 });
+
+app.get("/api/ai-timeouts", requireAuth, asyncRoute(async (_req, res) => {
+  const records = await listAiTimeouts();
+  res.json({
+    limitMs: AI_TIMEOUT_MS,
+    count: records.length,
+    records,
+  });
+}));
+
+app.post("/api/ai-timeouts", requireAuth, asyncRoute(async (req, res) => {
+  const saved = await recordAiTimeout({
+    kind: req.body?.kind,
+    label: req.body?.label,
+    model: req.body?.model,
+    ms: req.body?.ms,
+    reason: req.body?.reason || "timeout",
+    source: req.body?.source || "client",
+    at: req.body?.at,
+  });
+  res.status(saved.created ? 201 : 200).json({
+    limitMs: AI_TIMEOUT_MS,
+    count: saved.records.length,
+    entry: saved.entry,
+    records: saved.records,
+  });
+}));
 
 app.post("/api/auth/login", loginHandler);
 app.get("/api/auth/me", requireAuth, meHandler);
@@ -158,6 +199,26 @@ app.get("/api/sites/:siteId/builders", requireAuth, asyncRoute(async (req, res) 
   res.json({ builders });
 }));
 
+app.post("/api/sites/:siteId/plugins", requireAuth, asyncRoute(async (req, res) => {
+  const site = await getSite(req.params.siteId);
+  if (!site.installed) {
+    return res.status(400).json({ error: "Install base WordPress before installing plugins" });
+  }
+  if (!config.ssh?.configured) {
+    return res.status(400).json({ error: "SSH is not configured on the server" });
+  }
+  const plugin = sitePluginById(req.body?.plugin);
+  if (!plugin) {
+    return res.status(400).json({ error: "Unknown plugin. Use elementor, cf7, or yoast." });
+  }
+  const job = createJob(req.user.username, site.brief || {});
+  job.kind = "plugin";
+  job.pluginId = plugin.id;
+  job.siteId = site.id;
+  res.status(202).json({ jobId: job.id, plugin: plugin.id });
+  runBackground(() => runPluginInstallPipeline(job));
+}));
+
 app.put("/api/sites/:siteId/pages", requireAuth, asyncRoute(async (req, res) => {
   const current = await getSite(req.params.siteId);
   if (!current.installed) {
@@ -190,9 +251,7 @@ app.post("/api/sites/:siteId/install", requireAuth, asyncRoute(async (req, res) 
   const job = createJob(req.user.username, brief);
   job.siteId = site.id;
   res.status(202).json({ jobId: job.id, site });
-  runInstallPipeline(job).catch((err) => {
-    console.error(`Install job ${job.id} failed:`, err);
-  });
+  runBackground(() => runInstallPipeline(job));
 }));
 
 app.get("/api/sites/:siteId/themes", requireAuth, asyncRoute(async (req, res) => {
@@ -275,7 +334,7 @@ app.post(
     const id = uuid();
     const variant = themeLogoVariantPath(req.params.siteId, req.params.themeId, id);
     await writeLogoFile(variant, req.file.buffer, width, height);
-    await fs.copyFile(variant, themeLogoPath(req.params.siteId, req.params.themeId));
+    await persist.copyFile(variant, themeLogoPath(req.params.siteId, req.params.themeId));
     await updateTheme(req.params.siteId, req.params.themeId, {
       brief: {
         logoPrompt: req.body?.prompt !== undefined ? String(req.body.prompt) : theme.brief.logoPrompt,
@@ -316,7 +375,7 @@ app.post("/api/sites/:siteId/themes/:themeId/logo/generate", requireAuth, asyncR
     },
     brief
   );
-  await fs.copyFile(dest, themeLogoPath(req.params.siteId, req.params.themeId));
+  await persist.copyFile(dest, themeLogoPath(req.params.siteId, req.params.themeId));
   const updated = await registerThemeLogo(req.params.siteId, req.params.themeId, {
     id,
     source: "generated",
@@ -345,12 +404,29 @@ app.post("/api/sites/:siteId/themes/:themeId/generate", requireAuth, asyncRoute(
   const freshSite = await getSite(req.params.siteId);
   const brief = mergeSiteAndTheme(freshSite, theme);
   const job = createJob(req.user.username, brief);
+  job.kind = "theme";
   job.siteId = site.id;
   job.themeId = theme.id;
   res.status(202).json({ jobId: job.id, theme });
-  runThemePipeline(job).catch((err) => {
-    console.error(`Theme job ${job.id} failed:`, err);
-  });
+  runBackground(() => runThemeGeneratePipeline(job));
+}));
+
+app.post("/api/sites/:siteId/themes/:themeId/install", requireAuth, asyncRoute(async (req, res) => {
+  const site = await getSite(req.params.siteId);
+  if (!site.installed) {
+    return res.status(400).json({ error: "Install base WordPress before installing a theme" });
+  }
+  const theme = await getTheme(req.params.siteId, req.params.themeId);
+  if (!theme.hasZip) {
+    return res.status(400).json({ error: "Generate the theme first" });
+  }
+  const brief = mergeSiteAndTheme(site, theme);
+  const job = createJob(req.user.username, brief);
+  job.kind = "theme-install";
+  job.siteId = site.id;
+  job.themeId = theme.id;
+  res.status(202).json({ jobId: job.id, theme });
+  runBackground(() => runThemeInstallPipeline(job));
 }));
 
 app.post("/api/sites/:siteId/pages", requireAuth, asyncRoute(async (req, res) => {
@@ -401,20 +477,18 @@ app.post(
     brief: publicBrief(brief),
   });
 
-  runInstallPipeline(job).catch((err) => {
-    console.error(`Job ${job.id} failed:`, err);
-  });
+  runBackground(() => runInstallPipeline(job));
   }
 );
 
-app.get("/api/generate/:id", requireAuth, (req, res) => {
-  const job = getJob(req.params.id);
+app.get("/api/generate/:id", requireAuth, asyncRoute(async (req, res) => {
+  const job = await loadJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Job not found" });
   res.json(serializeJob(job));
-});
+}));
 
-app.get("/api/generate/:id/events", requireAuth, (req, res) => {
-  const job = getJob(req.params.id);
+app.get("/api/generate/:id/events", requireAuth, asyncRoute(async (req, res) => {
+  const job = (await loadJob(req.params.id)) || getJob(req.params.id);
   if (!job) return res.status(404).json({ error: "Job not found" });
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -435,13 +509,13 @@ app.get("/api/generate/:id/events", requireAuth, (req, res) => {
     clearInterval(heartbeat);
     job.events.off("event", onEvent);
   });
-});
+}));
 
-app.use("/api/files/:jobId", requireAuth, (req, res, next) => {
-  const job = getJob(req.params.jobId);
+app.use("/api/files/:jobId", requireAuth, asyncRoute(async (req, res, next) => {
+  const job = (await loadJob(req.params.jobId)) || getJob(req.params.jobId);
   if (!job) return res.status(404).json({ error: "Job not found" });
   express.static(path.join(config.storageDir, job.id))(req, res, next);
-});
+}));
 
 app.use((err, _req, res, _next) => {
   console.error(err);
@@ -450,19 +524,27 @@ app.use((err, _req, res, _next) => {
   res.status(status).json({ error: err.message || "Server error" });
 });
 
-await fs.mkdir(config.storageDir, { recursive: true });
-await ensureConfigDirs();
-await ensureAdminUser();
-await loadDebugState();
+export { app };
+export default app;
 
-const server = app.listen(config.port, () => {
-  console.log(`WP Theme Studio API on http://localhost:${config.port}`);
-});
-server.on("error", (err) => {
-  if (err.code === "EADDRINUSE") {
-    console.error(`Port ${config.port} is already in use. Stop the extra npm run dev and use http://localhost:5173`);
-    return;
-  }
-  console.error(err);
-  process.exit(1);
-});
+export const ready = (async () => {
+  await fs.mkdir(config.storageDir, { recursive: true });
+  await ensureConfigDirs();
+  await ensureAdminUser();
+  await loadDebugState();
+})();
+
+if (!process.env.VERCEL) {
+  await ready;
+  const server = app.listen(config.port, () => {
+    console.log(`WP Theme Studio API on http://localhost:${config.port}`);
+  });
+  server.on("error", (err) => {
+    if (err.code === "EADDRINUSE") {
+      console.error(`Port ${config.port} is already in use. Stop the extra npm run dev and use http://localhost:5173`);
+      return;
+    }
+    console.error(err);
+    process.exit(1);
+  });
+}

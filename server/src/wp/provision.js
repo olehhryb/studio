@@ -311,8 +311,14 @@ export async function ensureWpPluginOverSsh(ssh, remotePath, pluginSlug) {
   const cli = await ensureWpCli(ssh);
   const wp = wpBin(cli, remotePath);
   const active = await ssh.execCommand(`${wp} plugin is-active ${shQuote(pluginSlug)}`);
-  if (active.code === 0) return;
+  if (active.code === 0) return { slug: pluginSlug, action: "active" };
+  const installed = await ssh.execCommand(`${wp} plugin is-installed ${shQuote(pluginSlug)}`);
+  if (installed.code === 0) {
+    await sshExec(ssh, `${wp} plugin activate ${shQuote(pluginSlug)}`);
+    return { slug: pluginSlug, action: "activated" };
+  }
   await sshExec(ssh, `${wp} plugin install ${shQuote(pluginSlug)} --activate`);
+  return { slug: pluginSlug, action: "installed" };
 }
 
 export async function applyElementorPageOverSsh(ssh, remotePath, pageId, data) {
@@ -357,6 +363,8 @@ export async function detectActiveBuilders(ssh, remotePath) {
     gutenberg: true,
     wpbakery: names.some((name) => /js_composer|wpbakery/.test(name)),
     elementor: names.some((name) => name === "elementor" || name.startsWith("elementor")),
+    cf7: names.some((name) => name === "contact-form-7"),
+    yoast: names.some((name) => name === "wordpress-seo"),
     plugins: names,
   };
 }

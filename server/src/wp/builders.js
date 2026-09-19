@@ -9,6 +9,8 @@ export function emptyBuilders(extra = {}) {
     gutenberg: true,
     wpbakery: false,
     elementor: false,
+    cf7: false,
+    yoast: false,
     checked: false,
     error: null,
     plugins: [],
@@ -33,11 +35,12 @@ export async function detectBuildersForSite(site) {
   if (brief.wpSiteUrl && brief.wpUsername && brief.wpAppPassword) {
     try {
       const namespaces = await listWpNamespaces(brief);
-      if (namespaces.some((ns) => String(ns).toLowerCase().startsWith("elementor"))) {
-        result.elementor = true;
-      }
+      const ns = namespaces.map((item) => String(item).toLowerCase());
+      if (ns.some((name) => name.startsWith("elementor"))) result.elementor = true;
+      if (ns.some((name) => name.includes("contact-form-7"))) result.cf7 = true;
+      if (ns.some((name) => name.includes("yoast") || name.includes("wordpress-seo"))) result.yoast = true;
       result.checked = true;
-      if (result.error && (result.elementor || result.wpbakery)) result.error = null;
+      if (result.error && (result.elementor || result.wpbakery || result.cf7 || result.yoast)) result.error = null;
     } catch (err) {
       if (!result.checked) result.error = err.message;
     }

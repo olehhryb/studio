@@ -25,7 +25,6 @@ const ALIASES = {
   WP_USERNAME: ["WP_USERNAME"],
   WP_APP_PASSWORD: ["WP_APP_PASSWORD"],
   SITE_NAME: ["SITE_NAME"],
-  WP_DB_HOST: ["WP_DB_HOST"],
   WP_DB_NAME: ["WP_DB_NAME"],
   WP_DB_USER: ["WP_DB_USER"],
   WP_DB_PASSWORD: ["WP_DB_PASSWORD"],
@@ -123,7 +122,6 @@ export function normalizeBrief(input = {}) {
     wpUsername: String(input.WP_USERNAME || input.wpUsername || "").trim(),
     wpAppPassword: String(input.WP_APP_PASSWORD || input.wpAppPassword || "").trim(),
     siteName: String(input.SITE_NAME || input.siteName || input.COMPANY_NAME || input.companyName || "").trim(),
-    wpDbHost: String(input.WP_DB_HOST || input.wpDbHost || "").trim(),
     wpDbName: String(input.WP_DB_NAME || input.wpDbName || "").trim(),
     wpDbUser: String(input.WP_DB_USER || input.wpDbUser || "").trim(),
     wpDbPassword: String(input.WP_DB_PASSWORD || input.wpDbPassword || "").trim(),
@@ -144,7 +142,6 @@ export function validateBrief(brief, options = {}) {
     errors.push("Site domain must start with http:// or https://");
   }
   if (!brief.wpRemotePath) errors.push("WordPress folder is required");
-  if (!brief.wpDbHost) errors.push("Database host is required");
   if (!brief.wpDbName) errors.push("Database name is required");
   if (!brief.wpDbUser) errors.push("Database user is required");
   if (!brief.wpDbPassword) errors.push("Database password is required");

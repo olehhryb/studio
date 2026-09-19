@@ -13,6 +13,11 @@ function redactCommand(command) {
     .replace(/--admin_password=\S+/gi, "--admin_password=[redacted]");
 }
 
+function keyLooksEncrypted(key) {
+  const text = String(key || "");
+  return /ENCRYPTED/i.test(text) || /Proc-Type:\s*4,\s*ENCRYPTED/i.test(text) || /bcrypt/i.test(text);
+}
+
 export async function connectSsh() {
   const cfg = getSshConfig();
   if (!cfg.configured) {
@@ -30,6 +35,11 @@ export async function connectSsh() {
     if (cfg.passphrase) opts.passphrase = cfg.passphrase;
   }
   if (cfg.password) opts.password = cfg.password;
+  if (cfg.privateKey && keyLooksEncrypted(cfg.privateKey) && !cfg.passphrase) {
+    throw new Error(
+      "SSH private key is encrypted. Set SSH_PRIVATE_KEY_PASSPHRASE in .env or in Vercel env (then npm run env:vercel)."
+    );
+  }
   try {
     await ssh.connect(opts);
     await logEvent({
@@ -47,7 +57,11 @@ export async function connectSsh() {
       host: cfg.host,
       error: err.message,
     });
-    throw new Error(`SSH connection to ${cfg.username}@${cfg.host}:${cfg.port} failed: ${err.message}`);
+    throw new Error(
+      /passphrase|encrypted/i.test(err.message) && !cfg.passphrase
+        ? `SSH key for ${cfg.username}@${cfg.host} is encrypted. Set SSH_PRIVATE_KEY_PASSPHRASE in .env or Vercel env.`
+        : `SSH connection to ${cfg.username}@${cfg.host}:${cfg.port} failed: ${err.message}`
+    );
   }
 }
 

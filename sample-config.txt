@@ -11,7 +11,6 @@ THEME_REQUIREMENTS: Warm editorial look, large homepage hero, and a clear contac
 SITE_NAME: Oak & Iron Plumbing
 WP_SITE_URL: http://localhost:8080/site1
 WP_REMOTE_PATH: /home/deploy/public_html/site1
-WP_DB_HOST: db
 WP_DB_NAME: site1
 WP_DB_USER: site1
 WP_DB_PASSWORD: site1pass

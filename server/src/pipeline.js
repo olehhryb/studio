@@ -33,16 +33,20 @@ import {
   wpPing,
   zipBridgePlugin,
 } from "./wp/client.js";
+import * as persist from "./store/persist.js";
 import {
   applyElementorPageOverSsh,
   ensureCf7PluginOverSsh,
+  ensureWpPluginOverSsh,
   installPluginZipOverSsh,
   ensurePrimaryMenuOverSsh,
   installThemeOverSsh,
   provisionWordPress,
   setThemeLogoOverSsh,
 } from "./wp/provision.js";
-import { markSiteInstalled, readThemeLogoPath, registerThemeLogo, themeLogoPath, themeLogoVariantPath } from "./store/configs.js";
+import { markSiteInstalled, readThemeLogoPath, registerThemeLogo, themeLogoPath, themeLogoVariantPath, themeZipPath, updateTheme, getTheme } from "./store/configs.js";
+import { themeInputFingerprint } from "../../shared/themeFingerprint.js";
+import { sitePluginById } from "../../shared/sitePlugins.js";
 import { withSsh } from "./ssh/client.js";
 
 function replaceAll(value, token, replacement) {
@@ -291,10 +295,9 @@ async function prepareThemeLogo(job, brief) {
     },
     brief
   );
-  if (stored !== dest) await fs.copyFile(stored, dest);
+  if (stored !== dest) await persist.copyFile(stored, dest);
   if (job.siteId && job.themeId) {
-    await fs.mkdir(path.dirname(themeLogoPath(job.siteId, job.themeId)), { recursive: true });
-    await fs.copyFile(stored, themeLogoPath(job.siteId, job.themeId));
+    await persist.copyFile(stored, themeLogoPath(job.siteId, job.themeId));
     await registerThemeLogo(job.siteId, job.themeId, {
       id: logoId,
       source: "generated",
@@ -314,6 +317,57 @@ async function prepareThemeLogo(job, brief) {
 }
 
 export async function runThemePipeline(job) {
+  return runThemeGeneratePipeline(job);
+}
+
+export async function runThemeGeneratePipeline(job) {
+  const brief = job.brief;
+  const dir = await jobDir(job.id);
+
+  try {
+    job.status = "running";
+    emitJob(job, { type: "status", status: "running" });
+
+    brief.companyName = brief.companyName || brief.siteName;
+    brief.email = brief.email || brief.wpEditorEmail || brief.wpAdminEmail;
+    brief.areaOfBusiness = brief.areaOfBusiness || "Business";
+    brief.city = brief.city || "Local";
+
+    addStep(job, "theme", "Asking AI to generate the theme");
+    addLog(job, "Generating the WordPress theme");
+    const themeSpec = await generateThemeSpec(brief);
+    const logoFile = await prepareThemeLogo(job, brief);
+    const theme = await buildThemeZip({ brief, themeSpec, outDir: dir, logoPath: logoFile });
+    if (job.siteId && job.themeId) {
+      await persist.copyFile(theme.zipPath, themeZipPath(job.siteId, job.themeId));
+      const saved = await getTheme(job.siteId, job.themeId);
+      await updateTheme(job.siteId, job.themeId, {
+        generatedFingerprint: themeInputFingerprint(saved.themeName, saved.brief),
+        generatedAt: new Date().toISOString(),
+        generatedSlug: theme.slug,
+      });
+    }
+    finishStep(job, "theme", `Theme packaged: ${theme.slug}.zip`);
+    addLog(job, `Theme packaged: ${theme.slug}.zip`);
+    addResult(job, {
+      kind: "file",
+      title: "WordPress theme ZIP",
+      url: localUrl(job.id, path.basename(theme.zipPath)),
+    });
+
+    job.status = "done";
+    addLog(job, "Theme generated. Install it on WordPress when you are ready.");
+    emitJob(job, { type: "status", status: "done" });
+  } catch (err) {
+    job.status = "error";
+    job.error = err.message;
+    addLog(job, `Job failed: ${err.message}`);
+    emitJob(job, { type: "status", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+export async function runThemeInstallPipeline(job) {
   const brief = job.brief;
   const dir = await jobDir(job.id);
 
@@ -327,11 +381,24 @@ export async function runThemePipeline(job) {
     if (!brief.wpRemotePath) {
       throw new Error("WordPress folder is required to install the theme");
     }
+    if (!job.siteId || !job.themeId) {
+      throw new Error("Generate a theme first");
+    }
 
     brief.companyName = brief.companyName || brief.siteName;
     brief.email = brief.email || brief.wpEditorEmail || brief.wpAdminEmail;
-    brief.areaOfBusiness = brief.areaOfBusiness || "Business";
-    brief.city = brief.city || "Local";
+
+    const saved = await getTheme(job.siteId, job.themeId);
+    const zipPath = await persist.materialize(themeZipPath(job.siteId, job.themeId));
+    if (!zipPath) {
+      throw new Error("No generated theme ZIP. Generate the theme first.");
+    }
+    const slug = saved.generatedSlug || `wtg-${String(brief.companyName || "theme").toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40)}`;
+    const filename = path.basename(zipPath);
+    const workZip = path.join(dir, filename);
+    await fs.mkdir(dir, { recursive: true });
+    if (zipPath !== workZip) await persist.copyFile(zipPath, workZip);
+    const logoFile = await readThemeLogoPath(job.siteId, job.themeId);
 
     if (!brief.wpAppPassword) {
       addLog(job, "Refreshing WordPress credentials over SSH");
@@ -345,29 +412,16 @@ export async function runThemePipeline(job) {
       });
     }
 
-    addStep(job, "theme", "Asking AI to generate the theme");
-    addLog(job, "Generating the WordPress theme");
-    const themeSpec = await generateThemeSpec(brief);
-    const logoFile = await prepareThemeLogo(job, brief);
-    const theme = await buildThemeZip({ brief, themeSpec, outDir: dir, logoPath: logoFile });
-    finishStep(job, "theme", `Theme packaged: ${theme.slug}.zip`);
-    addLog(job, `Theme packaged: ${theme.slug}.zip`);
-    addResult(job, {
-      kind: "file",
-      title: "WordPress theme ZIP",
-      url: localUrl(job.id, path.basename(theme.zipPath)),
-    });
-
     addStep(job, "theme-ssh", "Uploading theme over SSH, installing and activating it");
-    addLog(job, `Uploading ${path.basename(theme.zipPath)} to the server`);
+    addLog(job, `Uploading ${filename} to the server`);
     try {
       await withSsh(async (ssh) => {
-        const installed = await installThemeOverSsh(ssh, brief.wpRemotePath, theme.zipPath, path.basename(theme.zipPath), theme.slug);
+        const installed = await installThemeOverSsh(ssh, brief.wpRemotePath, workZip, filename, slug);
         addLog(
           job,
           installed.replaced
-            ? `Replaced installed theme ${installed.name || theme.slug} with a new version`
-            : `Theme installed and activated: ${installed.name || theme.slug}`
+            ? `Replaced installed theme ${installed.name || slug} with a new version`
+            : `Theme installed and activated: ${installed.name || slug}`
         );
         if (logoFile) {
           try {
@@ -391,11 +445,11 @@ export async function runThemePipeline(job) {
         const bridgeZip = await zipBridgePlugin();
         await installPluginZipOverSsh(ssh, brief.wpRemotePath, bridgeZip, "wtg-bridge.zip");
       });
-      finishStep(job, "theme-ssh", `Theme activated: ${theme.slug}`);
+      finishStep(job, "theme-ssh", `Theme activated: ${slug}`);
       addResult(job, {
         kind: "info",
         title: "Theme installed and activated",
-        detail: theme.slug,
+        detail: slug,
       });
     } catch (err) {
       failStep(job, "theme-ssh", err.message);
@@ -403,8 +457,13 @@ export async function runThemePipeline(job) {
       throw err;
     }
 
+    await updateTheme(job.siteId, job.themeId, {
+      wpInstalledFingerprint: saved.generatedFingerprint || themeInputFingerprint(saved.themeName, saved.brief),
+      wpInstalledAt: new Date().toISOString(),
+    });
+
     job.status = "done";
-    addLog(job, "Theme generated and activated on WordPress.");
+    addLog(job, "Theme installed and activated on WordPress.");
     emitJob(job, { type: "status", status: "done" });
   } catch (err) {
     job.status = "error";
@@ -683,6 +742,56 @@ export async function runPagesPipeline(job) {
 
     job.status = "done";
     addLog(job, pages.length === 1 ? `${pages[0].title} generated and published.` : "Pages generated.");
+    emitJob(job, { type: "status", status: "done" });
+  } catch (err) {
+    job.status = "error";
+    job.error = err.message;
+    addLog(job, `Job failed: ${err.message}`);
+    emitJob(job, { type: "status", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+export async function runPluginInstallPipeline(job) {
+  const brief = job.brief;
+  const plugin = sitePluginById(job.pluginId);
+
+  try {
+    job.status = "running";
+    emitJob(job, { type: "status", status: "running" });
+
+    if (!plugin) {
+      throw new Error("Unknown plugin");
+    }
+    if (!config.ssh?.configured) {
+      throw new Error("SSH is not configured. Set SSH_PRIVATE_KEY in .env");
+    }
+    if (!brief.wpRemotePath) {
+      throw new Error("WordPress folder is required to install plugins");
+    }
+
+    addStep(job, "plugin", `Installing ${plugin.label}`);
+    addLog(job, `Installing and activating ${plugin.label} (${plugin.slug}) over SSH`);
+    try {
+      await withSsh(async (ssh) => {
+        const result = await ensureWpPluginOverSsh(ssh, brief.wpRemotePath, plugin.slug);
+        const message =
+          result.action === "active"
+            ? `${plugin.label} is already active`
+            : result.action === "activated"
+              ? `Activated ${plugin.label}`
+              : `Installed and activated ${plugin.label}`;
+        addLog(job, message);
+        addResult(job, { kind: "info", title: plugin.label, detail: message });
+      });
+      finishStep(job, "plugin", `${plugin.label} is active`);
+    } catch (err) {
+      failStep(job, "plugin", err.message);
+      addLog(job, `Could not install ${plugin.label}: ${err.message}`);
+      throw err;
+    }
+
+    job.status = "done";
     emitJob(job, { type: "status", status: "done" });
   } catch (err) {
     job.status = "error";

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { api, getToken, setToken } from "./api.js";
+import AiTimeoutWatch from "./components/AiTimeoutWatch.jsx";
+import StorageWatch from "./components/StorageWatch.jsx";
 import Login from "./pages/Login.jsx";
 import SitePicker from "./pages/SitePicker.jsx";
 import Studio from "./pages/Studio.jsx";
@@ -38,28 +40,36 @@ export default function App() {
 
   if (!siteId) {
     return (
-      <SitePicker
+      <>
+        <AiTimeoutWatch />
+        <StorageWatch />
+        <SitePicker
+          user={user}
+          onOpenSite={setSiteId}
+          onLogout={() => {
+            setToken(null);
+            setUser(null);
+            setSiteId(null);
+          }}
+        />
+      </>
+    );
+  }
+
+  return (
+    <>
+      <AiTimeoutWatch />
+      <StorageWatch />
+      <Studio
         user={user}
-        onOpenSite={setSiteId}
+        siteId={siteId}
+        onBack={() => setSiteId(null)}
         onLogout={() => {
           setToken(null);
           setUser(null);
           setSiteId(null);
         }}
       />
-    );
-  }
-
-  return (
-    <Studio
-      user={user}
-      siteId={siteId}
-      onBack={() => setSiteId(null)}
-      onLogout={() => {
-        setToken(null);
-        setUser(null);
-        setSiteId(null);
-      }}
-    />
+    </>
   );
 }

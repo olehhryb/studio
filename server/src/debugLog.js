@@ -17,7 +17,7 @@ function stateFile() {
 }
 
 export function logDir() {
-  return path.join(config.root, "logs");
+  return config.logsDir;
 }
 
 export function logFilePath(date = new Date()) {

@@ -46,8 +46,10 @@ const fromUrl = parseSshUrl(process.env.SSH_URL || process.env.SSH_HOST || proce
 
 export function getSshConfig() {
   const username = String(process.env.SSH_USERNAME || process.env.SSH_USER || fromUrl.username || "").trim();
-  const host = String(process.env.SSH_HOST || fromUrl.host || "").trim();
-  const port = Number(process.env.SSH_PORT || fromUrl.port || 22);
+  const hostRaw = String(process.env.SSH_HOST || fromUrl.host || "").trim();
+  const hostPort = hostRaw.match(/^(\S+):(\d+)$/);
+  const host = hostPort ? hostPort[1] : hostRaw;
+  const port = Number(process.env.SSH_PORT || process.env.SSH_SERVER_PORT || hostPort?.[2] || fromUrl.port || 22);
   const password = String(process.env.SSH_PASSWORD || "").trim();
   const privateKey = loadPrivateKey();
   const passphrase = String(process.env.SSH_PRIVATE_KEY_PASSPHRASE || "").trim();
@@ -68,13 +70,17 @@ const SHARED_HOSTING_SITE_DBS = {
   site3: { name: "site3", user: "site3", password: "site3pass" },
 };
 
+export function getWpDbHost() {
+  return String(process.env.WP_DB_HOST || process.env.DB_HOST || "localhost").trim() || "localhost";
+}
+
 function siteKeyFromRemotePath(remotePath) {
   return path.posix.basename(String(remotePath || "").replace(/\\/g, "/").replace(/\/+$/, ""));
 }
 
 export function getWpDbConfig(remotePath, brief = {}) {
   const config = {
-    host: String(brief.wpDbHost || "localhost").trim(),
+    host: getWpDbHost(),
     user: "",
     password: "",
     name: "",
