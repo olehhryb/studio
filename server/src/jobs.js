@@ -3,27 +3,8 @@ import path from "node:path";
 import { EventEmitter } from "node:events";
 import { v4 as uuid } from "uuid";
 import { config } from "./config.js";
-import { isBlobStore, readBlob, writeBlob } from "./store/persist.js";
 
 const jobs = new Map();
-const persistTimers = new Map();
-
-function jobBlobKey(id) {
-  return `studio/jobs/${id}.json`;
-}
-
-function persistJob(job) {
-  if (!isBlobStore()) return;
-  clearTimeout(persistTimers.get(job.id));
-  persistTimers.set(
-    job.id,
-    setTimeout(() => {
-      writeBlob(jobBlobKey(job.id), JSON.stringify(serializeJob(job)), "application/json").catch((err) => {
-        console.error(`Could not persist job ${job.id}:`, err.message);
-      });
-    }, 250)
-  );
-}
 
 export function createJob(owner, brief) {
   const id = uuid();
@@ -41,17 +22,6 @@ export function createJob(owner, brief) {
   };
   job.events.setMaxListeners(50);
   jobs.set(id, job);
-  persistJob(job);
-  return job;
-}
-
-function hydrateJob(data) {
-  const job = {
-    ...data,
-    events: new EventEmitter(),
-  };
-  job.events.setMaxListeners(50);
-  jobs.set(job.id, job);
   return job;
 }
 
@@ -60,16 +30,7 @@ export function getJob(id) {
 }
 
 export async function loadJob(id) {
-  const current = jobs.get(id);
-  if (current) return current;
-  if (!isBlobStore()) return null;
-  const raw = await readBlob(jobBlobKey(id));
-  if (!raw) return null;
-  try {
-    return hydrateJob(JSON.parse(raw));
-  } catch {
-    return null;
-  }
+  return jobs.get(id) || null;
 }
 
 export function serializeJob(job) {
@@ -92,7 +53,6 @@ export function serializeJob(job) {
 
 export function emitJob(job, payload) {
   job.events.emit("event", payload);
-  persistJob(job);
 }
 
 export function addStep(job, id, message) {

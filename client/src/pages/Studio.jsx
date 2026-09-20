@@ -577,9 +577,7 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
           <span>{user.username}</span>
           {health?.mockAi ? <span className="pill">Mock AI</span> : <span className="pill on">Live AI</span>}
           {health?.sshConfigured ? <span className="pill on">SSH {health.sshHost}:{health.sshPort || 22}</span> : <span className="pill">SSH missing</span>}
-          {health?.storage === "blob" ? <span className="pill on">Vercel Blob</span> : null}
-          {health?.storage === "ephemeral" ? <span className="pill">Storage not persistent</span> : null}
-          {health?.storage === "local" ? <span className="pill">Local disk</span> : null}
+          <span className="pill">Local disk</span>
           {installed ? <span className="pill on">WP installed</span> : <span className="pill">WP pending</span>}
           <label className="check debug-toggle">
             <input type="checkbox" checked={debugEnabled} onChange={toggleDebug} />

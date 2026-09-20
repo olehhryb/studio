@@ -1,9 +1,8 @@
 import { v4 as uuid } from "uuid";
-import { config } from "../config.js";
 import { readBlob, writeBlob } from "../store/persist.js";
 import { AI_TIMEOUT_MESSAGE, AI_TIMEOUT_MS } from "../../../shared/aiLimits.js";
 
-const BLOB_KEY = "studio/ai-timeouts.json";
+const TIMEOUTS_FILE = "studio/ai-timeouts.json";
 const MAX_RECORDS = 80;
 
 export { AI_TIMEOUT_MESSAGE, AI_TIMEOUT_MS };
@@ -15,7 +14,7 @@ function isAbortError(err) {
 }
 
 async function readRecords() {
-  const raw = await readBlob(BLOB_KEY);
+  const raw = await readBlob(TIMEOUTS_FILE);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -26,7 +25,7 @@ async function readRecords() {
 }
 
 async function writeRecords(records) {
-  await writeBlob(BLOB_KEY, `${JSON.stringify(records, null, 2)}\n`, "application/json");
+  await writeBlob(TIMEOUTS_FILE, `${JSON.stringify(records, null, 2)}\n`);
 }
 
 export async function listAiTimeouts() {
@@ -44,7 +43,7 @@ export async function recordAiTimeout(input = {}) {
     limitMs: AI_TIMEOUT_MS,
     reason: String(input.reason || "timeout"),
     source: String(input.source || "server"),
-    hosting: config.vercel ? "vercel" : "local",
+    hosting: "local",
     message: AI_TIMEOUT_MESSAGE,
   };
   const current = await readRecords();

@@ -17,13 +17,12 @@ async function readUsers() {
 
 async function writeUsers(users) {
   memoryUsers = users;
-  if (config.ephemeralFs) return;
   await fs.mkdir(config.dataDir, { recursive: true });
   await fs.writeFile(usersFile, JSON.stringify(users, null, 2));
 }
 
 export async function ensureAdminUser() {
-  const users = config.ephemeralFs ? [] : await readUsers();
+  const users = await readUsers();
   const existing = users.find((u) => u.username === config.adminUsername);
   const passwordHash = await bcrypt.hash(config.adminPassword, 10);
   if (existing) {

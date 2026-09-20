@@ -37,7 +37,7 @@ export async function connectSsh() {
   if (cfg.password) opts.password = cfg.password;
   if (cfg.privateKey && keyLooksEncrypted(cfg.privateKey) && !cfg.passphrase) {
     throw new Error(
-      "SSH private key is encrypted. Set SSH_PRIVATE_KEY_PASSPHRASE in .env or in Vercel env (then npm run env:vercel)."
+      "SSH private key is encrypted. Set SSH_PRIVATE_KEY_PASSPHRASE in .env."
     );
   }
   try {
@@ -59,7 +59,7 @@ export async function connectSsh() {
     });
     throw new Error(
       /passphrase|encrypted/i.test(err.message) && !cfg.passphrase
-        ? `SSH key for ${cfg.username}@${cfg.host} is encrypted. Set SSH_PRIVATE_KEY_PASSPHRASE in .env or Vercel env.`
+        ? `SSH key for ${cfg.username}@${cfg.host} is encrypted. Set SSH_PRIVATE_KEY_PASSPHRASE in .env.`
         : `SSH connection to ${cfg.username}@${cfg.host}:${cfg.port} failed: ${err.message}`
     );
   }

@@ -13,7 +13,6 @@ import { runInstallPipeline, runThemeGeneratePipeline, runThemeInstallPipeline, 
 import { sitePluginById } from "../../shared/sitePlugins.js";
 import { runBackground } from "./background.js";
 import * as persist from "./store/persist.js";
-import { isBlobStore } from "./store/persist.js";
 import { generateLogoFile, logoPromptFor, writeLogoFile } from "./ai/openai.js";
 import { AI_TIMEOUT_MS, listAiTimeouts, recordAiTimeout } from "./ai/timeouts.js";
 import { zipBridgePlugin } from "./wp/client.js";
@@ -115,14 +114,7 @@ app.get("/api/health", async (_req, res) => {
     sshHost: config.ssh?.configured ? config.ssh.host : null,
     sshPort: config.ssh?.configured ? config.ssh.port : null,
     wpDbHost: config.wpDbHost,
-    storage: isBlobStore() ? "blob" : config.ephemeralFs ? "ephemeral" : "local",
-    storageWarning: isBlobStore()
-      ? ""
-      : config.ephemeralFs
-        ? "Create a Vercel Blob store and connect it to this project so site and theme configs persist."
-        : process.env.VERCEL_OIDC_TOKEN
-          ? "Vercel env is loaded, but the Blob store is not connected to Development. In the Blob store: Projects → Update Project Connection → include Development, then npm run env:vercel. Until then sites are saved in local site_configs/."
-          : "",
+    storage: "local",
     aiTimeoutMs: AI_TIMEOUT_MS,
   });
 });
@@ -569,20 +561,15 @@ export const ready = (async () => {
   await loadDebugState();
 })();
 
-if (!process.env.VERCEL) {
-  await ready;
-  const server = app.listen(config.port, () => {
-    console.log(`WP Theme Studio API on http://localhost:${config.port}`);
-  });
-  persist.seedLocalIntoBlob().catch((err) => {
-    console.error("Could not seed Vercel Blob from local files:", err.message);
-  });
-  server.on("error", (err) => {
-    if (err.code === "EADDRINUSE") {
-      console.error(`Port ${config.port} is already in use. Stop the extra npm run dev and use http://localhost:5173`);
-      return;
-    }
-    console.error(err);
-    process.exit(1);
-  });
-}
+await ready;
+const server = app.listen(config.port, () => {
+  console.log(`WP Theme Studio API on http://localhost:${config.port}`);
+});
+server.on("error", (err) => {
+  if (err.code === "EADDRINUSE") {
+    console.error(`Port ${config.port} is already in use. Stop the extra npm run dev and use http://localhost:5173`);
+    return;
+  }
+  console.error(err);
+  process.exit(1);
+});

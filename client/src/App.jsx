@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import { api, getToken, setToken } from "./api.js";
 import AiTimeoutWatch from "./components/AiTimeoutWatch.jsx";
-import StorageWatch from "./components/StorageWatch.jsx";
 import Login from "./pages/Login.jsx";
 import SitePicker from "./pages/SitePicker.jsx";
 import Studio from "./pages/Studio.jsx";
@@ -55,7 +54,6 @@ export default function App() {
     return (
       <>
         <AiTimeoutWatch />
-        <StorageWatch />
         <SitePicker
           user={user}
           onOpenSite={setSiteId}
@@ -72,7 +70,6 @@ export default function App() {
   return (
     <>
       <AiTimeoutWatch />
-      <StorageWatch />
       <Studio
         user={user}
         siteId={siteId}
