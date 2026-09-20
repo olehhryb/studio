@@ -23,10 +23,14 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [job, setJob] = useState(null);
+  const [jobHistory, setJobHistory] = useState([]);
   const [debugEnabled, setDebugEnabled] = useState(false);
   const [siteSettingsOpen, setSiteSettingsOpen] = useState(false);
   const [themeOpen, setThemeOpen] = useState(false);
   const [pagesOpen, setPagesOpen] = useState(false);
+  const [studioOpen, setStudioOpen] = useState(true);
+  const [studioPrompt, setStudioPrompt] = useState("");
+  const [studioFormat, setStudioFormat] = useState("html");
   const [builders, setBuilders] = useState(null);
   const [buildersLoading, setBuildersLoading] = useState(false);
   const [logoBusy, setLogoBusy] = useState(false);
@@ -50,6 +54,7 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
     setThemeOpen(false);
     setPagesOpen(false);
     setJob(null);
+    setJobHistory([]);
     setError("");
     setBuilders(null);
     (async () => {
@@ -129,19 +134,31 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
   }, [job?.kind, job?.status, siteId]);
 
   useEffect(() => {
-    if ((job?.kind !== "theme" && job?.kind !== "theme-install") || job.status !== "done" || !theme?.id) return undefined;
+    if ((job?.kind !== "theme" && job?.kind !== "theme-install" && job?.kind !== "studio") || job.status !== "done") return undefined;
+    const themeId = job.themeId || theme?.id;
+    if (!themeId) return undefined;
     let cancelled = false;
-    api.getTheme(siteId, theme.id).then((data) => {
+    Promise.all([
+      api.getTheme(siteId, themeId),
+      job.kind === "studio" ? api.getSite(siteId) : Promise.resolve(null),
+      job.kind === "studio" ? api.listThemes(siteId) : Promise.resolve(null),
+    ]).then(([themeData, siteData, themeList]) => {
       if (cancelled) return;
       skipThemeSave.current = true;
-      setTheme(data.theme);
-      setThemeName(data.theme.themeName || "");
-      setThemeBrief({ ...emptyBrief(), ...data.theme.brief, pages: mergePages(data.theme.brief?.pages), logos: mergeLogos(data.theme.brief?.logos) });
+      setTheme(themeData.theme);
+      setThemeName(themeData.theme.themeName || "");
+      setThemeBrief({ ...emptyBrief(), ...themeData.theme.brief, pages: mergePages(themeData.theme.brief?.pages), logos: mergeLogos(themeData.theme.brief?.logos) });
+      if (themeList?.themes) setThemes(themeList.themes);
+      if (siteData?.site) {
+        skipPageSave.current = true;
+        setSite(siteData.site);
+        setSiteBrief({ ...emptyBrief(), ...siteData.site.brief, pages: mergePages(siteData.site.brief?.pages) });
+      }
     }).catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [job?.kind, job?.status, siteId, theme?.id]);
+  }, [job?.kind, job?.status, job?.themeId, siteId, theme?.id]);
 
   useEffect(() => {
     if (!site?.id || site.installed) return undefined;
@@ -311,6 +328,13 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
     return Boolean(String(pageSettings[key]?.prompt || "").trim());
   }
 
+  function beginJob(next) {
+    if (job?.id && job.id !== next.id) {
+      setJobHistory((list) => [job, ...list].slice(0, 24));
+    }
+    setJob(next);
+  }
+
   async function installBaseWp(e) {
     e.preventDefault();
     if (installed || !canInstall) return;
@@ -318,7 +342,7 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
     setError("");
     try {
       const payload = await api.installSite(siteId, siteBrief);
-      setJob({
+      beginJob({
         id: payload.jobId,
         kind: "install",
         status: "running",
@@ -341,7 +365,7 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
     setError("");
     try {
       const payload = await api.installSitePlugin(siteId, pluginId);
-      setJob({
+      beginJob({
         id: payload.jobId,
         kind: "plugin",
         pluginId,
@@ -372,9 +396,52 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
           pages: pageSettings,
         },
       });
-      setJob({
+      beginJob({
         id: payload.jobId,
         kind: "theme",
+        status: "running",
+        steps: [],
+        results: [],
+        logs: [],
+        error: null,
+      });
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function generateFullWebsite() {
+    if (!installed || !health?.sshConfigured || jobRunning || busy) return;
+    const prompt = String(studioPrompt || "").trim();
+    if (!prompt) return;
+    const format = formatOptions.some((item) => item.id === studioFormat) ? studioFormat : "html";
+    setBusy(true);
+    setError("");
+    try {
+      const payload = await api.generateStudioSite(siteId, {
+        prompt,
+        format,
+        themeId: theme?.id || "",
+      });
+      if (payload.theme) {
+        skipThemeSave.current = true;
+        setTheme(payload.theme);
+        setThemeName(payload.theme.themeName || "");
+        setThemeBrief({
+          ...emptyBrief(),
+          ...payload.theme.brief,
+          pages: mergePages(payload.theme.brief?.pages),
+          logos: mergeLogos(payload.theme.brief?.logos),
+        });
+        const list = await api.listThemes(siteId);
+        setThemes(list.themes || []);
+      }
+      beginJob({
+        id: payload.jobId,
+        kind: "studio",
+        themeId: payload.theme?.id,
         status: "running",
         steps: [],
         results: [],
@@ -394,7 +461,7 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
     setError("");
     try {
       const payload = await api.installTheme(siteId, theme.id);
-      setJob({
+      beginJob({
         id: payload.jobId,
         kind: "theme-install",
         status: "running",
@@ -482,7 +549,7 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
           pages: pagesPayload(),
         },
       });
-      setJob({
+      beginJob({
         id: payload.jobId,
         kind: "pages",
         pageKey,
@@ -498,13 +565,6 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
       setBusy(false);
     }
   }
-
-  const pages = useMemo(() => uniqueBy(job?.results?.filter((r) => r.kind === "page") || [], "url"), [job]);
-  const images = useMemo(() => uniqueBy(job?.results?.filter((r) => r.kind === "image") || [], "url"), [job]);
-  const extras = useMemo(
-    () => job?.results?.filter((r) => r.kind !== "page" && r.kind !== "image") || [],
-    [job]
-  );
 
   return (
     <div className="studio">
@@ -640,6 +700,73 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
             </section>
           )}
         </form>
+
+        <div className="panel">
+          <section className="site-summary">
+            <div className="site-summary-head">
+              <div>
+                <h2>Full website</h2>
+                <p className="hint">
+                  {!installed
+                    ? "Unlocks after WordPress is installed."
+                    : "Enter one prompt. The studio designs the site as HTML, splits chrome into a theme and bodies into pages, then installs the theme and publishes Home, About, and Contact."}
+                </p>
+              </div>
+              <button
+                type="button"
+                className="ghost site-summary-toggle"
+                aria-expanded={studioOpen}
+                onClick={() => setStudioOpen((open) => !open)}
+              >
+                {studioOpen ? "Hide" : "Show"}
+              </button>
+            </div>
+            {studioOpen ? (
+              <fieldset className="locked-fields" disabled={!installed}>
+                <label>
+                  Website prompt
+                  <textarea
+                    rows={6}
+                    value={studioPrompt}
+                    onChange={(e) => setStudioPrompt(e.target.value)}
+                    placeholder="Example: A warm construction company site for Complete Home Builders. Home with a hero, three services, and reviews. About the team. Contact with a form."
+                  />
+                </label>
+                <label>
+                  Page format
+                  <select
+                    value={formatOptions.some((item) => item.id === studioFormat) ? studioFormat : "html"}
+                    onChange={(e) => setStudioFormat(e.target.value)}
+                    disabled={!installed || buildersLoading}
+                  >
+                    {formatOptions.map((format) => (
+                      <option key={format.id} value={format.id}>
+                        {format.label}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button
+                  type="button"
+                  className={jobRunning && job?.kind === "studio" ? "working" : ""}
+                  onClick={generateFullWebsite}
+                  disabled={
+                    !installed ||
+                    !health?.sshConfigured ||
+                    !String(studioPrompt || "").trim() ||
+                    jobRunning ||
+                    busy
+                  }
+                >
+                  {jobRunning && job?.kind === "studio" ? "Generating and deploying…" : "Generate and deploy website"}
+                </button>
+                {!theme?.id && installed ? (
+                  <p className="hint">No theme selected — a new theme will be created automatically.</p>
+                ) : null}
+              </fieldset>
+            ) : null}
+          </section>
+        </div>
 
         <div className="panel">
           <section className="site-summary">
@@ -1021,81 +1148,16 @@ export default function Studio({ user, siteId, onBack, onLogout }) {
 
         <aside className="feed panel">
           <h2>Console</h2>
-          {!job ? (
-            <p className="hint">Install WordPress, generate and activate a theme, then generate and publish a page. Live output appears here, newest first.</p>
+          {!job && !jobHistory.length ? (
+            <p className="hint">Install WordPress, then generate a full website or a theme and pages. Live output appears here and stays after the next action.</p>
           ) : (
             <div className="console" role="log" aria-live="polite">
-              {images.length || pages.length ? (
-                <div className="console-outcome">
-                  {images.length ? (
-                    <div className="previews">
-                      {images.map((image) => (
-                        <figure key={image.url || image.title}>
-                          <img src={withAuthUrl(image.previewUrl || image.url)} alt={image.alt || image.title} />
-                          <figcaption>{image.title}</figcaption>
-                        </figure>
-                      ))}
-                    </div>
-                  ) : null}
-                  {pages.map((page) => (
-                    <div className="console-page-link" key={page.url || page.title}>
-                      <span>Page</span>
-                      <a href={withAuthUrl(page.url)} target="_blank" rel="noreferrer">
-                        {page.url}
-                      </a>
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-              {(job.logs || []).map((entry, index) => (
-                <div key={`${entry.at}-${index}`} className={`console-line ${entry.level || ""}`}>
-                  <time dateTime={new Date(entry.at).toISOString()}>{formatTime(entry.at)}</time>
-                  <div className="console-body">
-                    <span>{entry.message}</span>
-                    {entry.kind === "page" && entry.url ? (
-                      <a href={withAuthUrl(entry.url)} target="_blank" rel="noreferrer">
-                        {entry.url}
-                      </a>
-                    ) : null}
-                  </div>
-                </div>
+              {job ? <ConsoleJob job={job} /> : null}
+              {jobHistory.map((entry) => (
+                <ConsoleJob key={entry.id} job={entry} past />
               ))}
             </div>
           )}
-
-          {job ? (
-            <>
-              <ol className="steps">
-                {job.steps.map((step, index) => (
-                  <li key={`${step.id}-${index}`} className={step.status}>
-                    <strong>{labelStatus(step.status)}</strong>
-                    <span>{step.message}</span>
-                  </li>
-                ))}
-              </ol>
-              {job.error ? <p className="error">{job.error}</p> : null}
-
-              {extras.length ? (
-                <div className="block">
-                  <h3>Other</h3>
-                  {extras.map((item, index) => (
-                    <p key={`${item.title}-${index}`}>
-                      {item.title}
-                      {item.url ? (
-                        <>
-                          :{" "}
-                          <a href={withAuthUrl(item.url)} target="_blank" rel="noreferrer">
-                            {item.url}
-                          </a>
-                        </>
-                      ) : null}
-                      {item.detail ? <span className="hint"> — {item.detail}</span> : null}
-                    </p>
-                  ))}
-                </div>
-              ) : null}
-            </>
-          ) : null}
         </aside>
       </div>
     </div>
@@ -1207,7 +1269,7 @@ function SiteSettingsFields({ brief, onChange, includeCredentials = false }) {
 
 function applyEvent(current, event) {
   if (!current) return current;
-  if (event.type === "snapshot") return { ...current, ...event.job, kind: event.job?.kind || current.kind, pageKey: event.job?.pageKey || current.pageKey, pluginId: event.job?.pluginId || current.pluginId };
+  if (event.type === "snapshot") return { ...current, ...event.job, kind: event.job?.kind || current.kind, pageKey: event.job?.pageKey || current.pageKey, pluginId: event.job?.pluginId || current.pluginId, themeId: event.job?.themeId || current.themeId };
   if (event.type === "status") {
     return { ...current, status: event.status, error: event.error || current.error };
   }
@@ -1270,4 +1332,92 @@ function formatTime(at) {
     second: "2-digit",
     hour12: false,
   });
+}
+
+function jobLabel(job) {
+  if (job.kind === "studio") return "Full website";
+  if (job.kind === "theme") return "Generate theme";
+  if (job.kind === "theme-install") return "Install theme";
+  if (job.kind === "pages") return job.pageKey ? `Page: ${job.pageKey}` : "Pages";
+  if (job.kind === "plugin") return job.pluginId === "cf7" ? "Install CF7" : job.pluginId === "yoast" ? "Install Yoast SEO" : "Install plugin";
+  if (job.kind === "install") return "Install WordPress";
+  return "Job";
+}
+
+function ConsoleJob({ job, past = false }) {
+  const pages = uniqueBy(job?.results?.filter((r) => r.kind === "page") || [], "url");
+  const images = uniqueBy(job?.results?.filter((r) => r.kind === "image") || [], "url");
+  const extras = job?.results?.filter((r) => r.kind !== "page" && r.kind !== "image") || [];
+  return (
+    <section className={`console-job ${past ? "past" : ""}`}>
+      <header className="console-job-head">
+        <strong>{jobLabel(job)}</strong>
+        <span>{labelStatus(job.status)}</span>
+      </header>
+      {images.length || pages.length ? (
+        <div className="console-outcome">
+          {images.length ? (
+            <div className="previews">
+              {images.map((image) => (
+                <figure key={image.url || image.title}>
+                  <img src={withAuthUrl(image.previewUrl || image.url)} alt={image.alt || image.title} />
+                  <figcaption>{image.title}</figcaption>
+                </figure>
+              ))}
+            </div>
+          ) : null}
+          {pages.map((page) => (
+            <div className="console-page-link" key={page.url || page.title}>
+              <span>Page</span>
+              <a href={withAuthUrl(page.url)} target="_blank" rel="noreferrer">
+                {page.url}
+              </a>
+            </div>
+          ))}
+        </div>
+      ) : null}
+      {(job.logs || []).map((entry, index) => (
+        <div key={`${job.id}-${entry.at}-${index}`} className={`console-line ${entry.level || ""}`}>
+          <time dateTime={new Date(entry.at).toISOString()}>{formatTime(entry.at)}</time>
+          <div className="console-body">
+            <span>{entry.message}</span>
+            {entry.kind === "page" && entry.url ? (
+              <a href={withAuthUrl(entry.url)} target="_blank" rel="noreferrer">
+                {entry.url}
+              </a>
+            ) : null}
+          </div>
+        </div>
+      ))}
+      {(job.steps || []).length ? (
+        <ol className="steps">
+          {job.steps.map((step, index) => (
+            <li key={`${job.id}-${step.id}-${index}`} className={step.status}>
+              <strong>{labelStatus(step.status)}</strong>
+              <span>{step.message}</span>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {job.error ? <p className="error">{job.error}</p> : null}
+      {extras.length ? (
+        <div className="block">
+          {extras.map((item, index) => (
+            <p key={`${item.title}-${index}`}>
+              {item.title}
+              {item.url ? (
+                <>
+                  :{" "}
+                  <a href={withAuthUrl(item.url)} target="_blank" rel="noreferrer">
+                    {item.url}
+                  </a>
+                </>
+              ) : null}
+              {item.detail ? <span className="hint"> — {item.detail}</span> : null}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </section>
+  );
 }

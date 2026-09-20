@@ -153,6 +153,58 @@ If this is a contact page, include the token {{CF7_FORM}} where the form belongs
 Page CSS must live on the page (style block + "css" field), using the brand colors. Never ask the user to change theme CSS files.`;
 }
 
+export function studioSiteSystemPrompt() {
+  return `You design one complete marketing website as HTML, then SPLIT that design into a WordPress theme and page bodies.
+Think of a single homepage-to-contact site first (header, nav, footer, shared CSS, then each page's main content). Do not return one combined HTML document.
+The theme skeleton already has header, footer, topbar, and the native WordPress menu. Theme CSS only adds personality (hero, sections, buttons, cards, typography). Use --wtg-primary, --wtg-secondary, --wtg-font-title, --wtg-font-text. Do not load extra fonts.
+Page HTML is inner content only (no <html> or <body>), class names prefixed with wtg-. Put page-specific CSS in each page's "css" and in a <style> tag at the top of that page HTML.
+If a page needs images, EVERY image MUST use this exact placeholder (never a real URL):
+[IMG id="unique_slug" w="1600" h="900" prompt="detailed photographic prompt including business, city, lighting, composition"]
+0-3 images per page. Contact page MUST include {{CF7_FORM}} where the form belongs.
+If a slider is needed, use class names wtg-slider, wtg-slides, wtg-slide, wtg-prev, wtg-next.
+Return STRICT JSON only.`;
+}
+
+export function studioSiteUserPrompt(brief, prompt) {
+  return `Existing site context (use when helpful, invent the rest from the customer prompt):
+Company: ${brief.companyName || brief.siteName || ""}
+Business: ${brief.areaOfBusiness || ""}
+City: ${brief.city || ""}
+Phone: ${brief.phone || ""}
+Email: ${brief.email || brief.wpEditorEmail || brief.wpAdminEmail || ""}
+Primary: ${brief.primaryColor || "#1F4D3A"}
+Secondary: ${brief.secondaryColor || "#C45C26"}
+Title font: ${brief.titleFont || "Playfair Display"}
+Text font: ${brief.textFont || "Source Sans 3"}
+
+Customer prompt for the whole website:
+${prompt}
+
+Return JSON:
+{
+  "themeName": "short theme name",
+  "companyName": "",
+  "areaOfBusiness": "",
+  "city": "",
+  "phone": "",
+  "email": "",
+  "primaryColor": "#hex",
+  "secondaryColor": "#hex",
+  "titleFont": "Google Font name",
+  "textFont": "Google Font name",
+  "tagline": "short tagline",
+  "logoPrompt": "logo generation prompt matching the theme",
+  "themeRequirements": "shared chrome / header / footer personality",
+  "pageStyleRequirements": "shared rules so every page matches",
+  "css": "theme CSS only (no PHP, no @font-face)",
+  "pages": {
+    "home": { "title": "Home", "prompt": "one-line summary", "html": "inner HTML", "css": "page CSS" },
+    "about": { "title": "About Us", "prompt": "one-line summary", "html": "inner HTML", "css": "page CSS" },
+    "contact": { "title": "Contact Us", "prompt": "one-line summary", "html": "inner HTML", "css": "page CSS" }
+  }
+}`;
+}
+
 export function pageUserPrompt(brief, page) {
   return `Company: ${brief.companyName}
 Business: ${brief.areaOfBusiness}

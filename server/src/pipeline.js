@@ -20,15 +20,14 @@ import {
   logoPromptFor,
   uniqueImagePlaceholders,
   writeLogoFile,
+  generateStudioSite,
 } from "./ai/openai.js";
-import { googleFontsPageCss } from "../../shared/googleFonts.js";
-import { requestedPages } from "./configParser.js";
+import { DEFAULT_TEXT_FONT, DEFAULT_TITLE_FONT, googleFontsPageCss, sanitizeGoogleFont } from "../../shared/googleFonts.js";
+import { PAGE_DEFS, normalizePages, requestedPages } from "./configParser.js";
 import { buildThemeZip } from "./theme/buildTheme.js";
 import { embedPageAssets } from "./ai/pageChrome.js";
 import {
-  createCf7Form,
   setFrontPage,
-  uploadMedia,
   upsertPage,
   wpPing,
   zipBridgePlugin,
@@ -36,6 +35,7 @@ import {
 import * as persist from "./store/persist.js";
 import {
   applyElementorPageOverSsh,
+  createCf7FormOverSsh,
   ensureCf7PluginOverSsh,
   ensureWpPluginOverSsh,
   installPluginZipOverSsh,
@@ -43,8 +43,9 @@ import {
   installThemeOverSsh,
   provisionWordPress,
   setThemeLogoOverSsh,
+  uploadMediaOverSsh,
 } from "./wp/provision.js";
-import { markSiteInstalled, readThemeLogoPath, registerThemeLogo, themeLogoPath, themeLogoVariantPath, themeZipPath, updateTheme, getTheme } from "./store/configs.js";
+import { markSiteInstalled, readThemeLogoPath, registerThemeLogo, themeLogoPath, themeLogoVariantPath, themeZipPath, updateTheme, getTheme, getSite, updateSite, mergeSiteAndTheme } from "./store/configs.js";
 import { themeInputFingerprint } from "../../shared/themeFingerprint.js";
 import { sitePluginById } from "../../shared/sitePlugins.js";
 import { withSsh } from "./ssh/client.js";
@@ -320,7 +321,7 @@ export async function runThemePipeline(job) {
   return runThemeGeneratePipeline(job);
 }
 
-export async function runThemeGeneratePipeline(job) {
+export async function runThemeGeneratePipeline(job, options = {}) {
   const brief = job.brief;
   const dir = await jobDir(job.id);
 
@@ -333,9 +334,9 @@ export async function runThemeGeneratePipeline(job) {
     brief.areaOfBusiness = brief.areaOfBusiness || "Business";
     brief.city = brief.city || "Local";
 
-    addStep(job, "theme", "Asking AI to generate the theme");
-    addLog(job, "Generating the WordPress theme");
-    const themeSpec = await generateThemeSpec(brief);
+    addStep(job, "theme", options.themeSpec ? "Packaging the theme from the full-site design" : "Asking AI to generate the theme");
+    addLog(job, options.themeSpec ? "Building the WordPress theme from the split HTML design" : "Generating the WordPress theme");
+    const themeSpec = options.themeSpec || await generateThemeSpec(brief);
     const logoFile = await prepareThemeLogo(job, brief);
     const theme = await buildThemeZip({ brief, themeSpec, outDir: dir, logoPath: logoFile });
     if (job.siteId && job.themeId) {
@@ -357,7 +358,8 @@ export async function runThemeGeneratePipeline(job) {
 
     job.status = "done";
     addLog(job, "Theme generated. Install it on WordPress when you are ready.");
-    emitJob(job, { type: "status", status: "done" });
+    if (!options.skipFinish) emitJob(job, { type: "status", status: "done" });
+    else job.status = "running";
   } catch (err) {
     job.status = "error";
     job.error = err.message;
@@ -367,7 +369,7 @@ export async function runThemeGeneratePipeline(job) {
   }
 }
 
-export async function runThemeInstallPipeline(job) {
+export async function runThemeInstallPipeline(job, options = {}) {
   const brief = job.brief;
   const dir = await jobDir(job.id);
 
@@ -462,9 +464,13 @@ export async function runThemeInstallPipeline(job) {
       wpInstalledAt: new Date().toISOString(),
     });
 
-    job.status = "done";
     addLog(job, "Theme installed and activated on WordPress.");
-    emitJob(job, { type: "status", status: "done" });
+    if (!options.skipFinish) {
+      job.status = "done";
+      emitJob(job, { type: "status", status: "done" });
+    } else {
+      job.status = "running";
+    }
   } catch (err) {
     job.status = "error";
     job.error = err.message;
@@ -474,7 +480,7 @@ export async function runThemeInstallPipeline(job) {
   }
 }
 
-export async function runPagesPipeline(job) {
+export async function runPagesPipeline(job, options = {}) {
   const brief = job.brief;
   const dir = await jobDir(job.id);
   const imagesDir = path.join(dir, "images");
@@ -515,9 +521,9 @@ export async function runPagesPipeline(job) {
 
     const generated = [];
     for (const page of pages) {
-      addStep(job, `page-${page.key}`, `Generating ${page.title} (${page.format})`);
-      addLog(job, `Generating ${page.title} as ${page.format}`);
-      const spec = await generatePage(brief, page);
+      addStep(job, `page-${page.key}`, options.pageSpecs?.[page.key] ? `Using designed ${page.title} HTML` : `Generating ${page.title} (${page.format})`);
+      addLog(job, options.pageSpecs?.[page.key] ? `Publishing ${page.title} from the full-site HTML split` : `Generating ${page.title} as ${page.format}`);
+      const spec = options.pageSpecs?.[page.key] || await generatePage(brief, page);
       const pageCss = [googleFontsPageCss(brief.titleFont, brief.textFont), spec.css].filter(Boolean).join("\n");
       const html = embedPageAssets("html", unescapeMarkup(spec.html || spec.content || ""), pageCss);
       const content = embedPageAssets(page.format, unescapeMarkup(spec.content || spec.html || ""), pageCss);
@@ -608,17 +614,18 @@ export async function runPagesPipeline(job) {
     }
 
     const needsContact = generated.some((page) => page.key === "contact");
+    let cf7Spec = null;
     if (!useMockWp && needsContact) {
       addStep(job, "cf7", "Creating the Contact Form 7 form");
       try {
+        cf7Spec = await generateCf7(brief);
         await withSsh(async (ssh) => {
           await ensureCf7PluginOverSsh(ssh, brief.wpRemotePath);
+          const created = await createCf7FormOverSsh(ssh, brief.wpRemotePath, cf7Spec);
+          cf7Shortcode = created.shortcode || cf7Shortcode;
         });
-        const cf7 = await generateCf7(brief);
-        const created = await createCf7Form(brief, cf7);
-        cf7Shortcode = created.shortcode || cf7Shortcode;
         finishStep(job, "cf7", `Form created (${cf7Shortcode})`);
-        addResult(job, { kind: "form", title: cf7.title, detail: cf7Shortcode });
+        addResult(job, { kind: "form", title: cf7Spec.title, detail: cf7Shortcode });
       } catch (err) {
         failStep(job, "cf7", err.message);
         addLog(job, `CF7 setup failed: ${err.message}`);
@@ -628,20 +635,22 @@ export async function runPagesPipeline(job) {
     if (!useMockWp && generatedImages.length) {
       addStep(job, "media", "Uploading WebP images to the WordPress media library");
       try {
-        for (const img of generatedImages) {
-          const media = await uploadMedia(brief, img.filePath, img.filename, {
-            mime: "image/webp",
-            title: img.caption,
-            alt: img.caption,
-          });
-          uploadedById[img.uid] = {
-            url: media.source_url || media.guid?.rendered,
-            id: media.id,
-          };
-        }
+        await withSsh(async (ssh) => {
+          for (const img of generatedImages) {
+            const media = await uploadMediaOverSsh(ssh, brief.wpRemotePath, img.filePath, img.filename, {
+              title: img.caption,
+              alt: img.caption,
+            });
+            uploadedById[img.uid] = {
+              url: media.source_url,
+              id: media.id,
+            };
+          }
+        });
         finishStep(job, "media", "Images uploaded");
       } catch (err) {
         failStep(job, "media", `Media upload failed: ${err.message}`);
+        throw err;
       }
     }
 
@@ -740,14 +749,142 @@ export async function runPagesPipeline(job) {
       finishStep(job, "publish", "Pages published on WordPress");
     }
 
-    job.status = "done";
     addLog(job, pages.length === 1 ? `${pages[0].title} generated and published.` : "Pages generated.");
-    emitJob(job, { type: "status", status: "done" });
+    if (!options.skipFinish) {
+      job.status = "done";
+      emitJob(job, { type: "status", status: "done" });
+    } else {
+      job.status = "running";
+    }
   } catch (err) {
     job.status = "error";
     job.error = err.message;
     addLog(job, `Job failed: ${err.message}`);
     emitJob(job, { type: "status", status: "error", error: err.message });
+    throw err;
+  }
+}
+
+function hexColor(value, fallback) {
+  const raw = String(value || "").trim();
+  return /^#([0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(raw) ? raw : fallback;
+}
+
+function studioPageSpecs(planPages) {
+  const specs = {};
+  const source = planPages && typeof planPages === "object" ? planPages : {};
+  for (const def of PAGE_DEFS) {
+    if (def.custom) continue;
+    const raw = source[def.key] && typeof source[def.key] === "object" ? source[def.key] : {};
+    const html = String(raw.html || raw.content || "").trim();
+    if (!html) continue;
+    specs[def.key] = {
+      title: String(raw.title || def.title).trim() || def.title,
+      html,
+      content: String(raw.content || html).trim() || html,
+      css: String(raw.css || "").trim(),
+    };
+  }
+  return specs;
+}
+
+function studioPagesBrief(planPages, format, fallbackPrompt) {
+  const pages = normalizePages({});
+  const source = planPages && typeof planPages === "object" ? planPages : {};
+  for (const def of PAGE_DEFS) {
+    const raw = source[def.key] && typeof source[def.key] === "object" ? source[def.key] : {};
+    const html = String(raw.html || raw.content || "").trim();
+    if (def.custom && !html && !raw.prompt) continue;
+    pages[def.key] = {
+      title: String(raw.title || def.title).trim() || def.title,
+      format,
+      prompt: String(raw.prompt || "").trim() || (html ? `${def.title} from full-site generate` : fallbackPrompt),
+    };
+  }
+  return pages;
+}
+
+async function refreshJobBrief(job) {
+  const site = await getSite(job.siteId);
+  const theme = await getTheme(job.siteId, job.themeId);
+  job.brief = mergeSiteAndTheme(site, theme);
+  return { site, theme };
+}
+
+export async function runStudioPipeline(job) {
+  try {
+    job.status = "running";
+    emitJob(job, { type: "status", status: "running" });
+
+    const prompt = String(job.studioPrompt || "").trim();
+    if (!prompt) throw new Error("Enter a prompt for the whole website");
+    if (!job.siteId || !job.themeId) throw new Error("Select or create a theme first");
+
+    addStep(job, "studio-plan", "Designing the website HTML and splitting it into theme and pages");
+    addLog(job, "Asking AI to design the full site, then split chrome into the theme and bodies into pages");
+    const plan = await generateStudioSite(job.brief, prompt);
+    const format = String(job.pageFormat || "html").trim() || "html";
+    const pageSpecs = studioPageSpecs(plan.pages);
+    if (!pageSpecs.home && !pageSpecs.about && !pageSpecs.contact) {
+      throw new Error("The full-site design did not include page HTML");
+    }
+
+    const current = await getTheme(job.siteId, job.themeId);
+    const themeName = String(plan.themeName || current.themeName || job.brief.siteName || "Studio theme").trim();
+    const pages = studioPagesBrief(plan.pages, format, prompt);
+    const themeBrief = {
+      ...current.brief,
+      companyName: String(plan.companyName || job.brief.companyName || job.brief.siteName || "").trim(),
+      areaOfBusiness: String(plan.areaOfBusiness || job.brief.areaOfBusiness || "").trim(),
+      city: String(plan.city || job.brief.city || "").trim(),
+      phone: String(plan.phone || job.brief.phone || "").trim(),
+      email: String(plan.email || job.brief.email || job.brief.wpEditorEmail || "").trim(),
+      primaryColor: hexColor(plan.primaryColor, job.brief.primaryColor || "#1F4D3A"),
+      secondaryColor: hexColor(plan.secondaryColor, job.brief.secondaryColor || "#C45C26"),
+      titleFont: sanitizeGoogleFont(plan.titleFont || job.brief.titleFont, DEFAULT_TITLE_FONT),
+      textFont: sanitizeGoogleFont(plan.textFont || job.brief.textFont, DEFAULT_TEXT_FONT),
+      themeRequirements: String(plan.themeRequirements || prompt).trim(),
+      pageStyleRequirements: String(plan.pageStyleRequirements || "").trim(),
+      logoPrompt: String(plan.logoPrompt || current.brief.logoPrompt || "").trim(),
+      pages,
+    };
+    await updateTheme(job.siteId, job.themeId, { themeName, brief: themeBrief });
+    await updateSite(job.siteId, { brief: { pages } });
+    await refreshJobBrief(job);
+    finishStep(job, "studio-plan", `Split into theme "${themeName}" and ${Object.keys(pageSpecs).length} pages`);
+    addLog(job, `Theme: ${themeName}. Pages: ${Object.keys(pageSpecs).join(", ")}`);
+
+    const themeSpec = {
+      tagline: String(plan.tagline || themeBrief.companyName).trim(),
+      css: String(plan.css || "").trim(),
+    };
+    if (!themeSpec.css) {
+      addLog(job, "No theme CSS in the split; generating theme CSS");
+    }
+    await runThemeGeneratePipeline(job, {
+      skipFinish: true,
+      themeSpec: themeSpec.css ? themeSpec : undefined,
+    });
+    await refreshJobBrief(job);
+
+    addLog(job, "Installing the theme on WordPress");
+    await runThemeInstallPipeline(job, { skipFinish: true });
+    await refreshJobBrief(job);
+
+    job.pageKey = null;
+    addLog(job, "Publishing the split page HTML");
+    await runPagesPipeline(job, { skipFinish: true, pageSpecs });
+
+    job.status = "done";
+    addLog(job, "Full website generated, theme installed, and pages published.");
+    emitJob(job, { type: "status", status: "done" });
+  } catch (err) {
+    if (job.status !== "error") {
+      job.status = "error";
+      job.error = err.message;
+      addLog(job, `Job failed: ${err.message}`);
+      emitJob(job, { type: "status", status: "error", error: err.message });
+    }
     throw err;
   }
 }

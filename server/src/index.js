@@ -9,7 +9,7 @@ import { ensureAdminUser } from "./users.js";
 import { loginHandler, meHandler, requireAuth } from "./auth.js";
 import { normalizeBrief, parseConfigText, PAGE_DEFS, publicBrief, requestedPages, validateBrief, formatAllowed, clampLogoSize } from "./configParser.js";
 import { createJob, getJob, loadJob, serializeJob } from "./jobs.js";
-import { runInstallPipeline, runThemeGeneratePipeline, runThemeInstallPipeline, runPagesPipeline, runPluginInstallPipeline } from "./pipeline.js";
+import { runInstallPipeline, runThemeGeneratePipeline, runThemeInstallPipeline, runPagesPipeline, runPluginInstallPipeline, runStudioPipeline } from "./pipeline.js";
 import { sitePluginById } from "../../shared/sitePlugins.js";
 import { runBackground } from "./background.js";
 import * as persist from "./store/persist.js";
@@ -87,7 +87,7 @@ async function startPagesJob(req, res, site, theme = null) {
   const builders = await detectBuildersForSite(freshSite);
   const blocked = pages.find((page) => !formatAllowed(page.format, builders));
   if (blocked) {
-    const label = blocked.format === "elementor-free" ? "Elementor" : blocked.format === "wpbakery" ? "WPBakery" : blocked.format;
+    const label = blocked.format === "wpbakery" ? "WPBakery" : blocked.format;
     return res.status(400).json({ error: `${label} is not installed on this WordPress site` });
   }
   const job = createJob(req.user.username, brief);
@@ -209,7 +209,7 @@ app.post("/api/sites/:siteId/plugins", requireAuth, asyncRoute(async (req, res) 
   }
   const plugin = sitePluginById(req.body?.plugin);
   if (!plugin) {
-    return res.status(400).json({ error: "Unknown plugin. Use elementor, cf7, or yoast." });
+    return res.status(400).json({ error: "Unknown plugin. Use cf7 or yoast." });
   }
   const job = createJob(req.user.username, site.brief || {});
   job.kind = "plugin";
@@ -392,6 +392,41 @@ app.get("/api/sites/:siteId/themes/:themeId/download", requireAuth, asyncRoute(a
   res.send(file.body);
 }));
 
+app.post("/api/sites/:siteId/studio", requireAuth, asyncRoute(async (req, res) => {
+  const site = await getSite(req.params.siteId);
+  if (!site.installed) {
+    return res.status(400).json({ error: "Install base WordPress before generating the full website" });
+  }
+  if (!config.ssh?.configured) {
+    return res.status(400).json({ error: "SSH is not configured on the server" });
+  }
+  const prompt = String(req.body?.prompt || "").trim();
+  if (!prompt) {
+    return res.status(400).json({ error: "Enter a prompt for the whole website" });
+  }
+  const pageFormat = String(req.body?.format || "html").trim().toLowerCase() || "html";
+  const builders = await detectBuildersForSite(site);
+  if (!formatAllowed(pageFormat, builders)) {
+    return res.status(400).json({ error: `${pageFormat} is not available on this WordPress site` });
+  }
+  let theme = null;
+  const themeId = String(req.body?.themeId || "").trim();
+  if (themeId) {
+    theme = await getTheme(site.id, themeId);
+  } else {
+    theme = await createTheme(site.id, { themeName: site.brief?.siteName || "Studio theme" });
+  }
+  const brief = mergeSiteAndTheme(site, theme);
+  const job = createJob(req.user.username, brief);
+  job.kind = "studio";
+  job.siteId = site.id;
+  job.themeId = theme.id;
+  job.studioPrompt = prompt;
+  job.pageFormat = pageFormat;
+  res.status(202).json({ jobId: job.id, theme });
+  runBackground(() => runStudioPipeline(job));
+}));
+
 app.post("/api/sites/:siteId/themes/:themeId/generate", requireAuth, asyncRoute(async (req, res) => {
   const site = await getSite(req.params.siteId);
   if (!site.installed) {
@@ -538,6 +573,9 @@ if (!process.env.VERCEL) {
   await ready;
   const server = app.listen(config.port, () => {
     console.log(`WP Theme Studio API on http://localhost:${config.port}`);
+  });
+  persist.seedLocalIntoBlob().catch((err) => {
+    console.error("Could not seed Vercel Blob from local files:", err.message);
   });
   server.on("error", (err) => {
     if (err.code === "EADDRINUSE") {

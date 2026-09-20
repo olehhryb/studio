@@ -252,8 +252,26 @@ label { display: grid; gap: 0.35rem; font-size: 0.92rem; }
   overflow: auto;
   padding: 0.85rem 0.95rem;
   display: grid;
+  gap: 0.85rem;
+}
+.console-job {
+  display: grid;
   gap: 0.45rem;
 }
+.console-job.past {
+  opacity: 0.82;
+  padding-top: 0.7rem;
+  border-top: 1px solid #3a342c;
+}
+.console-job-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  color: #e7d3b8;
+  font-size: 0.78rem;
+}
+.console-job .steps { margin: 0.35rem 0 0; }
+.console-job .error { color: #fecaca; }
 .console p { margin: 0; display: grid; grid-template-columns: 6.2rem 1fr; gap: 0.7rem; }
 .console time { color: #c45c26; white-space: nowrap; }
 .console-line {

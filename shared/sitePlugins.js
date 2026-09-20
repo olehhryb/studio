@@ -1,5 +1,4 @@
 export const SITE_PLUGINS = [
-  { id: "elementor", slug: "elementor", label: "Elementor" },
   { id: "cf7", slug: "contact-form-7", label: "CF7" },
   { id: "yoast", slug: "wordpress-seo", label: "Yoast SEO" },
 ];
@@ -10,7 +9,6 @@ export function sitePluginById(id) {
 
 export function sitePluginActive(builders, plugin) {
   if (!builders || !plugin) return false;
-  if (plugin.id === "elementor") return Boolean(builders.elementor);
   if (plugin.id === "cf7") return Boolean(builders.cf7);
   if (plugin.id === "yoast") return Boolean(builders.yoast);
   const names = Array.isArray(builders.plugins) ? builders.plugins : [];
@@ -24,7 +22,6 @@ export function withSitePluginActive(builders, pluginId) {
     html: true,
     gutenberg: true,
     ...(builders || {}),
-    ...(plugin.id === "elementor" ? { elementor: true } : {}),
     ...(plugin.id === "cf7" ? { cf7: true } : {}),
     ...(plugin.id === "yoast" ? { yoast: true } : {}),
   };

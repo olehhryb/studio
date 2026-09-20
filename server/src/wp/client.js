@@ -9,9 +9,21 @@ function basicAuth(username, password) {
 
 function restUrls(siteUrl, pathname) {
   const base = String(siteUrl || "").replace(/\/+$/, "");
-  const pretty = `${base}${pathname}`;
-  const route = pathname.replace(/^\/wp-json/, "") || "/";
-  const query = `${base}/?rest_route=${encodeURIComponent(route)}`;
+  const raw = String(pathname || "");
+  const qIndex = raw.indexOf("?");
+  const pathOnly = qIndex === -1 ? raw : raw.slice(0, qIndex);
+  const search = qIndex === -1 ? "" : raw.slice(qIndex + 1);
+  const pretty = search ? `${base}${pathOnly}?${search}` : `${base}${pathOnly}`;
+  const route = pathOnly.replace(/^\/wp-json/, "") || "/";
+  const params = new URLSearchParams();
+  params.set("rest_route", route);
+  if (search) {
+    for (const [key, value] of new URLSearchParams(search)) {
+      if (key === "rest_route") continue;
+      params.append(key, value);
+    }
+  }
+  const query = `${base}/?${params.toString()}`;
   return pretty === query ? [pretty] : [pretty, query];
 }
 

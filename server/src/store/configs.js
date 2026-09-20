@@ -344,7 +344,6 @@ function emptyThemeBrief() {
 export async function ensureConfigDirs() {
   await persist.mkdir(config.siteConfigsDir);
   await persist.mkdir(config.themesDir);
-  await persist.seedLocalIntoBlob();
 }
 
 function siteRecord(parsed, fileSlug) {

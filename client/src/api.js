@@ -43,7 +43,7 @@ async function request(path, options = {}, attempt = 0) {
     }
     return data;
   } catch (err) {
-    const retryable = /timeout|failed to fetch|network|ECONNRESET|starting up/i.test(err.message || err.name || "");
+    const retryable = /timeout|failed to fetch|network|ECONNRESET|ECONNREFUSED|starting up/i.test(err.message || err.name || "");
     if (attempt < retries && retryable) {
       await delay(500 * (attempt + 1));
       return request(path, options, attempt + 1);
@@ -62,7 +62,7 @@ async function request(path, options = {}, attempt = 0) {
 export const api = {
   login: (username, password) =>
     request("/api/auth/login", { method: "POST", body: JSON.stringify({ username, password }) }),
-  me: () => request("/api/auth/me"),
+  me: () => request("/api/auth/me", { retries: 8 }),
   health: () => request("/api/health"),
   generate: (brief) => request("/api/generate", { method: "POST", body: JSON.stringify(brief) }),
   listSites: () => request("/api/sites"),
@@ -104,6 +104,12 @@ export const api = {
     request(`/api/sites/${siteId}/themes/${themeId}/logos/${logoId}/activate`, {
       method: "POST",
       body: JSON.stringify({}),
+    }),
+  generateStudioSite: (siteId, payload) =>
+    request(`/api/sites/${siteId}/studio`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(25000),
     }),
   generatePages: (siteId, payload) =>
     request(`/api/sites/${siteId}/pages`, {

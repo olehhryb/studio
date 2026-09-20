@@ -15,6 +15,8 @@ import {
   pagesUserPrompt,
   pageSystemPrompt,
   pageUserPrompt,
+  studioSiteSystemPrompt,
+  studioSiteUserPrompt,
   cf7SystemPrompt,
   cf7UserPrompt,
 } from "./prompts.js";
@@ -194,6 +196,38 @@ export async function generatePages(brief) {
 export async function generatePage(brief, page) {
   const data = await chatJson(pageSystemPrompt(page.format), pageUserPrompt(brief, page), page.key || "page");
   return data || mockSinglePage(brief, page);
+}
+
+function mockStudioSite(brief, prompt) {
+  const theme = mockTheme(brief);
+  const pages = mockPages(brief);
+  return {
+    themeName: brief.companyName || brief.siteName || "Studio theme",
+    companyName: brief.companyName || brief.siteName || "Studio",
+    areaOfBusiness: brief.areaOfBusiness || String(prompt || "Business").slice(0, 80),
+    city: brief.city || "Local",
+    phone: brief.phone || "",
+    email: brief.email || brief.wpEditorEmail || brief.wpAdminEmail || "",
+    primaryColor: brief.primaryColor || "#1F4D3A",
+    secondaryColor: brief.secondaryColor || "#C45C26",
+    titleFont: brief.titleFont || "Playfair Display",
+    textFont: brief.textFont || "Source Sans 3",
+    tagline: theme.tagline,
+    logoPrompt: `${brief.companyName || "Company"} logo, ${brief.areaOfBusiness || "business"}, clean, no text clutter`,
+    themeRequirements: String(prompt || "").trim() || "Cohesive marketing site",
+    pageStyleRequirements: "Match the theme colors, fonts, and card/button look on every page.",
+    css: theme.css,
+    pages: {
+      home: { ...pages.home, prompt: "Home from full-site generate", css: "" },
+      about: { ...pages.about, prompt: "About from full-site generate", css: "" },
+      contact: { ...pages.contact, prompt: "Contact from full-site generate", css: "" },
+    },
+  };
+}
+
+export async function generateStudioSite(brief, prompt) {
+  const data = await chatJson(studioSiteSystemPrompt(), studioSiteUserPrompt(brief, prompt), "studio");
+  return data || mockStudioSite(brief, prompt);
 }
 
 function mockSinglePage(brief, page) {

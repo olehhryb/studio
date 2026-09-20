@@ -166,13 +166,11 @@ export const PAGE_FORMATS = [
   { id: "html", label: "HTML" },
   { id: "gutenberg", label: "Gutenberg" },
   { id: "wpbakery", label: "WpBakery" },
-  { id: "elementor-free", label: "ElementorFree" },
 ];
 
 export function availablePageFormats(builders) {
   return PAGE_FORMATS.filter((format) => {
     if (format.id === "wpbakery") return Boolean(builders?.wpbakery);
-    if (format.id === "elementor-free") return Boolean(builders?.elementor);
     return true;
   });
 }

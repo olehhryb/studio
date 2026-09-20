@@ -179,9 +179,19 @@ export async function provisionWordPress(ssh, brief, { onLog } = {}) {
 }
 
 function parseJsonOutput(text, fallback = []) {
+  const raw = String(text || "").trim();
   try {
-    return JSON.parse(String(text || "").trim() || "null") ?? fallback;
+    return JSON.parse(raw || "null") ?? fallback;
   } catch {
+    const start = Math.max(raw.lastIndexOf("{"), raw.lastIndexOf("["));
+    const end = Math.max(raw.lastIndexOf("}"), raw.lastIndexOf("]"));
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(raw.slice(start, end + 1));
+      } catch {
+        return fallback;
+      }
+    }
     return fallback;
   }
 }
@@ -305,6 +315,86 @@ export async function installPluginZipOverSsh(ssh, remotePath, zipPath, filename
 
 export async function ensureCf7PluginOverSsh(ssh, remotePath) {
   return ensureWpPluginOverSsh(ssh, remotePath, "contact-form-7");
+}
+
+export async function createCf7FormOverSsh(ssh, remotePath, spec) {
+  const cli = await ensureWpCli(ssh);
+  const wp = wpBin(cli, remotePath);
+  const stamp = Date.now();
+  const localJson = path.join(os.tmpdir(), `wtg-cf7-${stamp}.json`);
+  const localPhp = path.join(os.tmpdir(), `wtg-cf7-${stamp}.php`);
+  const remoteJson = `/tmp/wtg-cf7-${stamp}.json`;
+  const remotePhp = `/tmp/wtg-cf7-${stamp}.php`;
+  const payload = {
+    title: String(spec?.title || "Contact"),
+    form: String(spec?.form || ""),
+    mailSubject: String(spec?.mailSubject || ""),
+    mailRecipient: String(spec?.mailRecipient || ""),
+    mailBodyHtml: String(spec?.mailBodyHtml || ""),
+  };
+  const php = `<?php
+$spec = json_decode((string) file_get_contents(${JSON.stringify(remoteJson)}), true);
+if (!is_array($spec)) { fwrite(STDERR, 'Invalid CF7 payload'); exit(1); }
+if (!class_exists('WPCF7_ContactForm')) { fwrite(STDERR, 'Contact Form 7 is not active'); exit(1); }
+$contact_form = WPCF7_ContactForm::get_template(array('title' => $spec['title']));
+$properties = $contact_form->get_properties();
+$properties['form'] = (string) ($spec['form'] ?? '');
+$properties['mail']['subject'] = (string) ($spec['mailSubject'] ?? '');
+$properties['mail']['recipient'] = (string) ($spec['mailRecipient'] ?? '');
+$properties['mail']['body'] = (string) ($spec['mailBodyHtml'] ?? '');
+$properties['mail']['use_html'] = true;
+$properties['mail']['sender'] = $spec['title'] . ' <[your-email]>';
+$contact_form->set_properties($properties);
+$contact_form->set_title($spec['title']);
+$contact_form->save();
+$id = $contact_form->id();
+echo wp_json_encode(array(
+  'id' => $id,
+  'shortcode' => '[contact-form-7 id="' . $id . '" title="' . esc_attr($spec['title']) . '"]',
+));
+`;
+  await fs.writeFile(localJson, JSON.stringify(payload));
+  await fs.writeFile(localPhp, php);
+  await ssh.putFile(localJson, remoteJson);
+  await ssh.putFile(localPhp, remotePhp);
+  try {
+    const result = await sshExec(ssh, `${wp} eval-file ${shQuote(remotePhp)}`);
+    const parsed = parseJsonOutput(result.stdout, null);
+    if (!parsed?.id || !parsed?.shortcode) {
+      throw new Error((result.stderr || result.stdout || "Could not create the Contact Form 7 form").trim());
+    }
+    return parsed;
+  } finally {
+    await ssh.execCommand(`rm -f ${shQuote(remoteJson)} ${shQuote(remotePhp)}`);
+    await fs.unlink(localJson).catch(() => {});
+    await fs.unlink(localPhp).catch(() => {});
+  }
+}
+
+export async function uploadMediaOverSsh(ssh, remotePath, localPath, filename, meta = {}) {
+  const cli = await ensureWpCli(ssh);
+  const wp = wpBin(cli, remotePath);
+  const safeName = String(filename || path.basename(localPath) || "image.webp").replace(/[^a-zA-Z0-9._-]/g, "_");
+  const remote = `/tmp/wtg-media-${Date.now()}-${safeName}`;
+  await ssh.putFile(localPath, remote);
+  try {
+    const imported = await sshExec(
+      ssh,
+      `${wp} media import ${shQuote(remote)} --title=${shQuote(meta.title || safeName)} --alt=${shQuote(meta.alt || meta.title || safeName)} --porcelain`
+    );
+    const id = Number(String(imported.stdout || "").trim());
+    if (!Number.isFinite(id) || id <= 0) {
+      throw new Error((imported.stderr || imported.stdout || "WordPress did not return a media ID").trim());
+    }
+    const urlRes = await sshExec(ssh, `${wp} eval ${shQuote(`echo wp_get_attachment_url(${id});`)}`);
+    const source_url = String(urlRes.stdout || "").trim();
+    if (!source_url) {
+      throw new Error(`WordPress imported ${safeName} but did not return a public URL`);
+    }
+    return { id, source_url };
+  } finally {
+    await ssh.execCommand(`rm -f ${shQuote(remote)}`);
+  }
 }
 
 export async function ensureWpPluginOverSsh(ssh, remotePath, pluginSlug) {

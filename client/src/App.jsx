@@ -12,15 +12,28 @@ export default function App() {
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    let cancelled = false;
     if (!getToken()) {
       setReady(true);
-      return;
+      return undefined;
     }
     api
       .me()
-      .then((data) => setUser(data.user))
-      .catch(() => setToken(null))
-      .finally(() => setReady(true));
+      .then((data) => {
+        if (!cancelled) setUser(data.user);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        if (/session expired|sign in required/i.test(err.message || "")) {
+          setToken(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setReady(true);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (!ready) {
