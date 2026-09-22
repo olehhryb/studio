@@ -15,8 +15,8 @@ export default defineConfig({
       "/api": {
         target: "http://localhost:3001",
         changeOrigin: true,
-        timeout: 190000,
-        proxyTimeout: 190000,
+        timeout: 620000,
+        proxyTimeout: 620000,
         configure(proxy) {
           proxy.on("error", (err, _req, res) => {
             console.error("API proxy error:", err.message);

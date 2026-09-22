@@ -1,3 +1,5 @@
+import { AI_TIMEOUT_MS } from "../../shared/aiLimits.js";
+
 const TOKEN_KEY = "wtg_token";
 
 export function getToken() {
@@ -97,7 +99,7 @@ export const api = {
     request(`/api/sites/${siteId}/themes/${themeId}/logo/generate`, {
       method: "POST",
       body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(180000),
+      signal: AbortSignal.timeout(AI_TIMEOUT_MS),
       retries: 0,
     }),
   activateThemeLogo: (siteId, themeId, logoId) =>
