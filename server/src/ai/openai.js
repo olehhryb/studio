@@ -34,19 +34,31 @@ function parseJson(text) {
   return JSON.parse(trimmed.slice(start, end + 1));
 }
 
-async function chatJson(system, user, label = "chat") {
-  const openai = client();
-  if (!openai) return null;
-  const started = Date.now();
-  const requestBody = {
+function modelAllowsTemperature(model) {
+  const name = String(model || "").toLowerCase();
+  return !/^o[1-9]\b/.test(name) && !/^gpt-[5-9]/.test(name) && !name.includes("astra");
+}
+
+function chatRequestBody(system, user) {
+  const body = {
     model: config.openaiModel,
-    temperature: 0.7,
     response_format: { type: "json_object" },
     messages: [
       { role: "system", content: system },
       { role: "user", content: user },
     ],
   };
+  if (modelAllowsTemperature(config.openaiModel)) {
+    body.temperature = 0.7;
+  }
+  return body;
+}
+
+async function chatJson(system, user, label = "chat") {
+  const openai = client();
+  if (!openai) return null;
+  const started = Date.now();
+  const requestBody = chatRequestBody(system, user);
   try {
     const completion = await withAiTimeout(
       { kind: "chat", label, model: config.openaiModel },
